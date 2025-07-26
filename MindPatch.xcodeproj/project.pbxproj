@@ -29,9 +29,35 @@
 		6B2B79792E352CE10070EB5C /* MindPatchUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MindPatchUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		6B2B7A092E3542060070EB5C /* Exceptions for "MindPatch" folder in "MindPatch" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				"Extensions/View+If.swift",
+				Utilities/UUIDGenerator.swift,
+			);
+			target = 6B2B79612E352CDF0070EB5C /* MindPatch */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
+		6B2B7A0A2E3542060070EB5C /* Exceptions for "MindPatch" folder in "Copy Bundle Resources" phase from "MindPatch" target */ = {
+			isa = PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet;
+			buildPhase = 6B2B79602E352CDF0070EB5C /* Resources */;
+			membershipExceptions = (
+				"Extensions/View+If.swift",
+				Utilities/UUIDGenerator.swift,
+			);
+		};
+/* End PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		6B2B79642E352CDF0070EB5C /* MindPatch */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				6B2B7A092E3542060070EB5C /* Exceptions for "MindPatch" folder in "MindPatch" target */,
+				6B2B7A0A2E3542060070EB5C /* Exceptions for "MindPatch" folder in "Copy Bundle Resources" phase from "MindPatch" target */,
+			);
 			path = MindPatch;
 			sourceTree = "<group>";
 		};
