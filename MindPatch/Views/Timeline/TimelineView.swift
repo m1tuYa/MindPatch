@@ -5,11 +5,38 @@ struct TimelineView: View {
     let board: Board?
     @State private var blocks: [Block] = []
     @State private var focusedBlockId: UUID? = nil
+    @State private var isPresentingPostEditor = false
+    @State private var draftPost = Block.emptyPost()
+    @State private var draftBlocks: [Block] = []
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 16) {
-                postList
+        ZStack {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    postList
+                }
+            }
+
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
+                    Button(action: {
+                        draftPost = Block.emptyPost()
+                        draftBlocks = [Block.emptyTextBlock(postId: draftPost.id)]
+                        isPresentingPostEditor = true
+                    }) {
+                        Image(systemName: "plus")
+                            .resizable()
+                            .frame(width: 20, height: 20)
+                            .padding()
+                            .background(Color.blue)
+                            .foregroundColor(.white)
+                            .clipShape(Circle())
+                            .shadow(radius: 4)
+                    }
+                    .padding()
+                }
             }
         }
         .navigationTitle(board?.title ?? "Timeline")
@@ -25,78 +52,46 @@ struct TimelineView: View {
         .onAppear {
             blocks = BlockRepository.loadBlocks()
         }
+        .sheet(isPresented: $isPresentingPostEditor) {
+            ZStack {
+                Color.white.ignoresSafeArea()
+                PostEditorView(
+                    post: draftPost,
+                    blocks: draftBlocks,
+                    boardBlock: nil,
+                    onSave: { newPost, newBlocks in
+                        blocks.append(newPost)
+                        blocks.append(contentsOf: newBlocks)
+                    }
+                )
+            }
+        }
     }
 
     private var postList: some View {
         ForEach(postsToDisplay(), id: \.id) { post in
-            VStack(alignment: .leading, spacing: 8) {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(alignment: .center, spacing: 8) {
-                        if let boardBlock = boardBlock(for: post.boardId) {
-                            Board(block: boardBlock).iconImage
-                                .resizable()
-                                .frame(width: 28, height: 28)
-                                .clipShape(Circle())
-                        }
-
-                        HStack(alignment: .center, spacing: 4) {
-                            TextField("ポストの内容", text: Binding(
-                                get: { post.content },
-                                set: { newValue in
-                                    if let index = blocks.firstIndex(where: { $0.id == post.id }) {
-                                        blocks[index].content = newValue
-                                    }
-                                })
-                            )
-                            .font(.title2)
-                            .bold()
-
-                            Text((post.createdAt ?? Date()).formatted(.dateTime.year().month().day().hour().minute()))
-                                .font(.caption)
-                                .foregroundColor(.gray)
-
-                            Spacer()
-
-                            Image(systemName: "ellipsis")
-                                .padding(.top, 4)
-                        }
+            PostView(
+                post: post,
+                boardBlock: boardBlock(for: post.boardId),
+                blocks: blocksForPost(post.id),
+                onEdit: {
+                    // Implement edit functionality here if needed
+                },
+                onDelete: {
+                    blocks.removeAll { $0.id == post.id }
+                },
+                focusedBlockId: focusedBlockId,
+                updateBlock: { updated in
+                    if let index = blocks.firstIndex(where: { $0.id == updated.id }) {
+                        blocks[index] = updated
                     }
-
-                    ForEach(Array(blocksForPost(post.id).enumerated()), id: \.1.id) { index, block in
-                        BlockView(
-                            block: Binding(
-                                get: {
-                                    if let i = blocks.firstIndex(where: { $0.id == block.id }) {
-                                        return blocks[i]
-                                    } else {
-                                        return block
-                                    }
-                                },
-                                set: { newValue in
-                                    if let i = blocks.firstIndex(where: { $0.id == block.id }) {
-                                        blocks[i] = newValue
-                                    }
-                                }
-                            ),
-                            index: index,
-                            indentLevel: 0,
-                            focusedBlockId: $focusedBlockId,
-                            onDelete: { id in
-                                blocks.removeAll { $0.id == id }
-                            },
-                            onDuplicate: { blk in
-                                var duplicatedBlock = blk
-                                duplicatedBlock.id = UUID()
-                                blocks.insert(duplicatedBlock, at: index + 1)
-                            }
-                        )
-                        .id(block.id) // Ensure SwiftUI recognizes identity changes for focused updates
-                    }
-
-                    Divider()
+                },
+                onDuplicate: { duplicated in
+                    var newBlock = duplicated
+                    newBlock.id = UUID()
+                    blocks.append(newBlock)
                 }
-                .padding(.horizontal)
-            }
+            )
         }
     }
 

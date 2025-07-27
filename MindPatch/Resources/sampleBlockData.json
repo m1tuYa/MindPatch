@@ -9,7 +9,7 @@
     "boardId": null,
     "postId": null,
     "props": {
-      "iconUrl": "board_icons/usage.png"
+      "iconUrl": "Resources/board_icons/usage.png"
     }
   },
   {
@@ -22,7 +22,7 @@
     "boardId": null,
     "postId": null,
     "props": {
-      "iconUrl": "board_icons/dev.png"
+      "iconUrl": "Resources/board_icons/dev.png"
     }
   },
   {
@@ -35,7 +35,7 @@
     "boardId": null,
     "postId": null,
     "props": {
-      "iconUrl": "board_icons/idea.png"
+      "iconUrl": "Resources/board_icons/idea.png"
     }
   },
   {

@@ -22,8 +22,8 @@ struct BlockRepository {
             if b.id == UUID(uuidString: "00000000-0000-0000-0000-000000000000") { b.id = UUID() }
             if b.content.isEmpty { b.content = "" }
             if b.order < 0 { b.order = 0 }
-            if b.boardId == nil { b.boardId = UUID() }
-            if b.postId == nil { b.postId = UUID() }
+            if b.boardId == nil { b.boardId = Block.unassignedBoardId }
+            if b.postId == nil { b.postId = Block.unassignedPostId }
             if b.createdAt == nil { b.createdAt = Date() }
             if b.updatedAt == nil { b.updatedAt = Date() }
             if b.type == .numberedList && b.listGroupId == nil {

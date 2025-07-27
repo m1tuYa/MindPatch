@@ -4,6 +4,94 @@ enum BlockType: String, Codable {
     case board, post, text, heading1, heading2, list, checkbox, numberedList
 }
 
+extension Block {
+    static let unassignedBoardId = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+    static let unassignedPostId = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+    static func emptyPost() -> Block {
+        Block(
+            id: UUID(),
+            type: .post,
+            content: "",
+            parentId: nil,
+            postId: nil,
+            boardId: Block.unassignedBoardId,
+            listGroupId: nil,
+            order: 0,
+            createdAt: Date(),
+            updatedAt: Date(),
+            status: "draft",
+            tags: [],
+            isPinned: false,
+            isCollapsed: false,
+            style: nil,
+            props: [:]
+        )
+    }
+
+    static func emptyTextBlock(postId: UUID) -> Block {
+        Block(
+            id: UUID(),
+            type: .text,
+            content: "",
+            parentId: nil,
+            postId: postId,
+            boardId: Block.unassignedBoardId,
+            listGroupId: nil,
+            order: 0,
+            createdAt: Date(),
+            updatedAt: Date(),
+            status: "draft",
+            tags: [],
+            isPinned: false,
+            isCollapsed: false,
+            style: nil,
+            props: [:]
+        )
+    }
+
+    static func unassignedPost(forBoard boardId: UUID) -> Block {
+        Block(
+            id: UUID(),
+            type: .post,
+            content: "未所属ポスト",
+            parentId: nil,
+            postId: nil,
+            boardId: boardId,
+            listGroupId: nil,
+            order: 0,
+            createdAt: Date(),
+            updatedAt: Date(),
+            status: "system",
+            tags: [],
+            isPinned: false,
+            isCollapsed: false,
+            style: nil,
+            props: ["isSystemReserved": AnyCodable(true)]
+        )
+    }
+
+    static func unassignedBoard() -> Block {
+        Block(
+            id: UUID(),
+            type: .board,
+            content: "未所属ボード",
+            parentId: nil,
+            postId: nil,
+            boardId: nil,
+            listGroupId: nil,
+            order: 0,
+            createdAt: Date(),
+            updatedAt: Date(),
+            status: "system",
+            tags: [],
+            isPinned: false,
+            isCollapsed: false,
+            style: nil,
+            props: ["isSystemReserved": AnyCodable(true)]
+        )
+    }
+}
+
 struct Block: Identifiable, Codable, Equatable, Hashable {
     var id: UUID
     var type: BlockType
