@@ -4,6 +4,7 @@ import Foundation
 struct TimelineView: View {
     let board: Board?
     @State private var blocks: [Block] = []
+    @State private var focusedBlockId: UUID? = nil
 
     var body: some View {
         ScrollView {
@@ -62,7 +63,34 @@ struct TimelineView: View {
                     }
 
                     ForEach(Array(blocksForPost(post.id).enumerated()), id: \.1.id) { index, block in
-                        BlockView(block: .constant(block), index: index, indentLevel: 0, focusedBlockId: .constant(nil))
+                        BlockView(
+                            block: Binding(
+                                get: {
+                                    if let i = blocks.firstIndex(where: { $0.id == block.id }) {
+                                        return blocks[i]
+                                    } else {
+                                        return block
+                                    }
+                                },
+                                set: { newValue in
+                                    if let i = blocks.firstIndex(where: { $0.id == block.id }) {
+                                        blocks[i] = newValue
+                                    }
+                                }
+                            ),
+                            index: index,
+                            indentLevel: 0,
+                            focusedBlockId: $focusedBlockId,
+                            onDelete: { id in
+                                blocks.removeAll { $0.id == id }
+                            },
+                            onDuplicate: { blk in
+                                var duplicatedBlock = blk
+                                duplicatedBlock.id = UUID()
+                                blocks.insert(duplicatedBlock, at: index + 1)
+                            }
+                        )
+                        .id(block.id) // Ensure SwiftUI recognizes identity changes for focused updates
                     }
 
                     Divider()
