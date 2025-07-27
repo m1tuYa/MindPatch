@@ -1,21 +1,20 @@
-
-
 import Foundation
 
 enum BlockType: String, Codable {
-    case board, post, text, heading1, heading2, list, checkbox
+    case board, post, text, heading1, heading2, list, checkbox, numberedList
 }
 
-struct Block: Identifiable, Codable {
-    var id: String
+struct Block: Identifiable, Codable, Equatable, Hashable {
+    var id: UUID
     var type: BlockType
     var content: String
-    var parentId: String?
-    var postId: String?
-    var boardId: String?
+    var parentId: UUID?
+    var postId: UUID?
+    var boardId: UUID?
+    var listGroupId: UUID?
     var order: Float
-    var createdAt: Date
-    var updatedAt: Date
+    var createdAt: Date?
+    var updatedAt: Date?
     var status: String? // "draft", "published", "archived"
     var tags: [String]?
     var isPinned: Bool?
@@ -24,11 +23,15 @@ struct Block: Identifiable, Codable {
     var props: [String: AnyCodable]?
 }
 
-struct AnyCodable: Codable {
-    let value: Any
+struct AnyCodable: Codable, Equatable, Hashable {
+    let value: AnyHashable
 
     init(_ value: Any) {
-        self.value = value
+        if let hashableValue = value as? AnyHashable {
+            self.value = hashableValue
+        } else {
+            self.value = "\(value)"
+        }
     }
 
     init(from decoder: Decoder) throws {
@@ -48,7 +51,7 @@ struct AnyCodable: Codable {
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
-        switch value {
+        switch value.base {
         case let intValue as Int:
             try container.encode(intValue)
         case let doubleValue as Double:

@@ -154,19 +154,19 @@ Board一覧    block.type === “board”    任意（order or 最近更新順�
 ```
 JournalMemoApp/
 ├── 📁 Models/
-│   ├── Block.swift
+│   ├── ✅ Block.swift
 │   ├── BlockNode.swift
 │   ├── Board.swift
 │   └── PropsSchema.swift
 │
 ├── 📁 ViewModels/
-│   ├── BlockStore.swift
+│   ├── ✅ BlockStore.swift
 │   ├── BoardStore.swift
 │   └── UIState.swift
 │
 ├── 📁 Views/
 │   ├── 📁 Timeline/
-│   │   ├── TimelineView.swift
+│   │   ├── ✅ TimelineView.swift
 │   │   ├── PostCardView.swift
 │   │   └── TimelineToolbar.swift
 │   │
@@ -177,8 +177,8 @@ JournalMemoApp/
 │   │   └── TableBoardView.swift
 │   │
 │   ├── 📁 Blocks/
-│   │   ├── BlockView.swift
-│   │   ├── TextBlockView.swift
+│   │   ├── ✅ BlockView.swift
+│   │   ├── ✅ TextBlockView.swift
 │   │   ├── ListBlockView.swift
 │   │   ├── CheckboxBlockView.swift
 │   │   └── HeadingBlockView.swift
@@ -191,8 +191,11 @@ JournalMemoApp/
 │   │   ├── SidebarView.swift
 │   │   └── BoardSelectorView.swift
 │   │
-│   ├── ContentView.swift
+│   ├── ✅ ContentView.swift
 │   └── SplitView.swift
+│
+├── 📁 Repositories/
+│   └── BlockRepository.swift
 │
 ├── 📁 Services/
 │   ├── BlockIOService.swift
