@@ -7,7 +7,7 @@ struct TimelineView: View {
     @State private var focusedBlockId: UUID? = nil
     @State private var isPresentingPostEditor = false
     @State private var draftPost = Block.emptyPost()
-    @State private var draftBlocks: [Block] = []
+    @State private var draftBlocks: [Block] = [Block.emptyTextBlock(postId: Block.unassignedPostId)]
 
     var body: some View {
         ZStack {
@@ -58,7 +58,7 @@ struct TimelineView: View {
                 PostEditorView(
                     post: draftPost,
                     blocks: draftBlocks,
-                    boardBlock: nil,
+                    boardBlock: boardBlock(for: draftPost.boardId),
                     onSave: { newPost, newBlocks in
                         blocks.append(newPost)
                         blocks.append(contentsOf: newBlocks)

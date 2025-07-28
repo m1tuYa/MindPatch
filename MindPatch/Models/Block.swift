@@ -51,7 +51,7 @@ extension Block {
 
     static func unassignedPost(forBoard boardId: UUID) -> Block {
         Block(
-            id: UUID(),
+            id: unassignedPostId,
             type: .post,
             content: "未所属ポスト",
             parentId: nil,
@@ -72,7 +72,7 @@ extension Block {
 
     static func unassignedBoard() -> Block {
         Block(
-            id: UUID(),
+            id: Block.unassignedBoardId,
             type: .board,
             content: "未所属ボード",
             parentId: nil,

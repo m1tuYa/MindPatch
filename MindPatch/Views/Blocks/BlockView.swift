@@ -1,21 +1,81 @@
 import SwiftUI
 
+struct CustomTextView: UIViewRepresentable {
+    @Binding var text: String
+    let onEnter: () -> Void
+    let onShiftEnter: () -> Void
+    let onTab: () -> Void
+    let onShiftTab: () -> Void
+
+    func makeUIView(context: Context) -> UITextView {
+        let textView = UITextView()
+        textView.delegate = context.coordinator
+        textView.font = UIFont.systemFont(ofSize: 16)
+        textView.isScrollEnabled = false
+        textView.backgroundColor = .clear
+        return textView
+    }
+
+    func updateUIView(_ uiView: UITextView, context: Context) {
+        if uiView.text != text {
+            uiView.text = text
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    class Coordinator: NSObject, UITextViewDelegate {
+        var parent: CustomTextView
+
+        init(_ parent: CustomTextView) {
+            self.parent = parent
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            parent.text = textView.text
+        }
+
+        func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+            if text == "\n" {
+                // Simplified shift detection: assume shift+enter adds newline, enter triggers onEnter
+                if textView.text.last == "\n" {
+                    parent.onShiftEnter()
+                } else {
+                    parent.onEnter()
+                }
+                return false
+            }
+            return true
+        }
+    }
+}
+
 struct BlockView: View {
     @Binding var block: Block
     var index: Int? = nil
     var indentLevel: Int = 0
     @Binding var focusedBlockId: UUID?
-    @FocusState private var isTextFieldFocused: Bool
     var onDelete: ((UUID) -> Void)? = nil
     var onDuplicate: ((Block) -> Void)? = nil
 
-    init(block: Binding<Block>, index: Int? = nil, indentLevel: Int = 0, focusedBlockId: Binding<UUID?>, onDelete: ((UUID) -> Void)? = nil, onDuplicate: ((Block) -> Void)? = nil) {
+    var onEnter: ((UUID) -> Void)? = nil
+    var onShiftEnter: ((UUID) -> Void)? = nil
+    var onTab: ((UUID) -> Void)? = nil
+    var onShiftTab: ((UUID) -> Void)? = nil
+
+    init(block: Binding<Block>, index: Int? = nil, indentLevel: Int = 0, focusedBlockId: Binding<UUID?>, onDelete: ((UUID) -> Void)? = nil, onDuplicate: ((Block) -> Void)? = nil, onEnter: ((UUID) -> Void)? = nil, onShiftEnter: ((UUID) -> Void)? = nil, onTab: ((UUID) -> Void)? = nil, onShiftTab: ((UUID) -> Void)? = nil) {
         self._block = block
         self.index = index
         self.indentLevel = indentLevel
         self._focusedBlockId = focusedBlockId
         self.onDelete = onDelete
         self.onDuplicate = onDuplicate
+        self.onEnter = onEnter
+        self.onShiftEnter = onShiftEnter
+        self.onTab = onTab
+        self.onShiftTab = onShiftTab
     }
 
     var body: some View {
@@ -70,23 +130,43 @@ struct BlockView: View {
             VStack(alignment: .leading) {
                 switch block.type {
                 case .text:
-                    TextField("ブロック内容", text: $block.content)
-                        .focused($isTextFieldFocused)
+                    CustomTextView(
+                        text: $block.content,
+                        onEnter: { onEnter?(block.id) },
+                        onShiftEnter: { onShiftEnter?(block.id) ?? block.content.append("\n") },
+                        onTab: { onTab?(block.id) },
+                        onShiftTab: { onShiftTab?(block.id) }
+                    )
                 case .heading1:
-                    TextField("ブロック内容", text: $block.content)
-                        .font(.title2)
-                        .bold()
-                        .focused($isTextFieldFocused)
+                    CustomTextView(
+                        text: $block.content,
+                        onEnter: { onEnter?(block.id) },
+                        onShiftEnter: { onShiftEnter?(block.id) ?? block.content.append("\n") },
+                        onTab: { onTab?(block.id) },
+                        onShiftTab: { onShiftTab?(block.id) }
+                    )
+                    .font(.title2)
+                    .bold()
                 case .heading2:
-                    TextField("ブロック内容", text: $block.content)
-                        .font(.title3)
-                        .bold()
-                        .focused($isTextFieldFocused)
+                    CustomTextView(
+                        text: $block.content,
+                        onEnter: { onEnter?(block.id) },
+                        onShiftEnter: { onShiftEnter?(block.id) ?? block.content.append("\n") },
+                        onTab: { onTab?(block.id) },
+                        onShiftTab: { onShiftTab?(block.id) }
+                    )
+                    .font(.title3)
+                    .bold()
                 case .list:
                     HStack(alignment: .top) {
                         Text("•")
-                        TextField("ブロック内容", text: $block.content)
-                            .focused($isTextFieldFocused)
+                        CustomTextView(
+                            text: $block.content,
+                            onEnter: { onEnter?(block.id) },
+                            onShiftEnter: { onShiftEnter?(block.id) ?? block.content.append("\n") },
+                            onTab: { onTab?(block.id) },
+                            onShiftTab: { onShiftTab?(block.id) }
+                        )
                     }
                 case .numberedList:
                     HStack(alignment: .top) {
@@ -95,14 +175,24 @@ struct BlockView: View {
                         } else {
                             Text("1.")
                         }
-                        TextField("ブロック内容", text: $block.content)
-                            .focused($isTextFieldFocused)
+                        CustomTextView(
+                            text: $block.content,
+                            onEnter: { onEnter?(block.id) },
+                            onShiftEnter: { onShiftEnter?(block.id) ?? block.content.append("\n") },
+                            onTab: { onTab?(block.id) },
+                            onShiftTab: { onShiftTab?(block.id) }
+                        )
                     }
                 case .checkbox:
                     HStack {
                         Image(systemName: block.props?["checked"]?.value as? Bool == true ? "checkmark.square" : "square")
-                        TextField("ブロック内容", text: $block.content)
-                            .focused($isTextFieldFocused)
+                        CustomTextView(
+                            text: $block.content,
+                            onEnter: { onEnter?(block.id) },
+                            onShiftEnter: { onShiftEnter?(block.id) ?? block.content.append("\n") },
+                            onTab: { onTab?(block.id) },
+                            onShiftTab: { onShiftTab?(block.id) }
+                        )
                     }
                 default:
                     Text("Unsupported block type")
@@ -110,11 +200,9 @@ struct BlockView: View {
                 }
             }
         }
-        .padding(.leading, CGFloat(indentLevel) * 12)
-        .onChange(of: isTextFieldFocused) { oldValue, newValue in
-            if newValue {
-                focusedBlockId = block.id
-            }
+        .padding(.leading, CGFloat(indentLevel) * 20)
+        .onChange(of: focusedBlockId) { _, newValue in
+            // No focus state handling for iOS UITextView here
         }
     }
 }

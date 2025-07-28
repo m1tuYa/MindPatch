@@ -10,7 +10,9 @@ struct PostEditorView: View {
     @State private var focusedBlockId: UUID?
 
     var body: some View {
-        NavigationView {
+        // Break up the complex ForEach expression to help type-checking
+        let indexedBlocks = Array(blocks.enumerated())
+        return NavigationView {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .center, spacing: 8) {
@@ -31,10 +33,22 @@ struct PostEditorView: View {
                                 .foregroundColor(.gray)
 
                             Spacer()
+
+                            Menu {
+                                Button("編集", action: {
+                                    // ここに編集アクションを追加できます（今はPostEditorなので空でOK）
+                                })
+                                Button("削除", role: .destructive, action: {
+                                    // 削除アクション（必要であれば渡す）
+                                })
+                            } label: {
+                                Image(systemName: "ellipsis")
+                                    .padding(.top, 4)
+                            }
                         }
                     }
 
-                    ForEach(Array(blocks.enumerated()), id: \.1.id) { index, block in
+                    ForEach(indexedBlocks, id: \.1.id) { index, block in
                         BlockView(
                             block: Binding(
                                 get: { blocks[index] },
@@ -48,7 +62,8 @@ struct PostEditorView: View {
                                 var duplicated = blk
                                 duplicated.id = UUID()
                                 blocks.insert(duplicated, at: index + 1)
-                            }
+                            },
+                            onEnter: { _ in insertNewBlockBelow(block.id) }
                         )
                     }
 
@@ -71,5 +86,20 @@ struct PostEditorView: View {
                 }
             }
         }
+    }
+
+    func insertNewBlockBelow(_ id: UUID) {
+        guard let index = blocks.firstIndex(where: { $0.id == id }) else { return }
+        let current = blocks[index]
+        let newBlock = Block(
+            id: UUID(),
+            type: current.type,
+            content: "",
+            parentId: current.parentId,
+            postId: current.postId,
+            boardId: current.boardId,
+            order: current.order + 1
+        )
+        blocks.insert(newBlock, at: index + 1)
     }
 }

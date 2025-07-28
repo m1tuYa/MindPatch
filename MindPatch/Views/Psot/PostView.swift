@@ -3,12 +3,34 @@ import SwiftUI
 struct PostView: View {
     let post: Block
     let boardBlock: Block?
-    let blocks: [Block]
+    @State private var blocks: [Block]
     let onEdit: () -> Void
     let onDelete: () -> Void
     let focusedBlockId: UUID?
     let updateBlock: (Block) -> Void
     let onDuplicate: (Block) -> Void
+
+    public init(
+        post: Block,
+        boardBlock: Block?,
+        blocks: [Block],
+        onEdit: @escaping () -> Void,
+        onDelete: @escaping () -> Void,
+        focusedBlockId: UUID?,
+        updateBlock: @escaping (Block) -> Void,
+        onDuplicate: @escaping (Block) -> Void
+    ) {
+        self.post = post
+        self.boardBlock = boardBlock
+        _blocks = State(initialValue: blocks)
+        self.onEdit = onEdit
+        self.onDelete = onDelete
+        self.focusedBlockId = focusedBlockId
+        self.updateBlock = updateBlock
+        self.onDuplicate = onDuplicate
+    }
+
+    @State private var isPresentingEditor = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -39,7 +61,9 @@ struct PostView: View {
                     Spacer()
 
                     Menu {
-                        Button("編集", action: onEdit)
+                        Button("編集") {
+                            isPresentingEditor = true
+                        }
                         Button("削除", role: .destructive, action: onDelete)
                     } label: {
                         Image(systemName: "ellipsis")
@@ -55,15 +79,73 @@ struct PostView: View {
                         set: { newValue in updateBlock(newValue) }
                     ),
                     index: index,
-                    indentLevel: 0,
+                    indentLevel: calculateIndentLevel(for: block),
                     focusedBlockId: .constant(focusedBlockId),
                     onDelete: { id in onDelete() },
-                    onDuplicate: { blk in onDuplicate(blk) }
+                    onDuplicate: { blk in onDuplicate(blk) },
+                    onEnter: { _ in insertNewBlockBelow(block.id) },
+                    onShiftEnter: { updateBlockContentWithNewline($0) },
+                    onTab: { indentBlock($0) },
+                    onShiftTab: { outdentBlock($0) }
                 )
             }
 
             Divider()
         }
         .padding(.horizontal)
+        .sheet(isPresented: $isPresentingEditor) {
+            PostEditorView(
+                post: post,
+                blocks: blocks,
+                boardBlock: boardBlock,
+                onSave: { updatedPost, updatedBlocks in
+                    updateBlock(updatedPost)
+                    updatedBlocks.forEach(updateBlock)
+                    isPresentingEditor = false
+                }
+            )
+        }
+    }
+
+    func insertNewBlockBelow(_ id: UUID) {
+        guard let index = blocks.firstIndex(where: { $0.id == id }) else { return }
+        let current = blocks[index]
+        let newBlock = Block(
+            id: UUID(),
+            type: current.type,
+            content: "",
+            parentId: current.parentId,
+            postId: current.postId,
+            boardId: current.boardId,
+            order: current.order + 1
+        )
+        blocks.insert(newBlock, at: index + 1)
+    }
+
+    func updateBlockContentWithNewline(_ id: UUID) {
+        guard let index = blocks.firstIndex(where: { $0.id == id }) else { return }
+        blocks[index].content.append("\n")
+    }
+
+    func indentBlock(_ id: UUID) {
+        guard let index = blocks.firstIndex(where: { $0.id == id }), index > 0 else { return }
+        let previous = blocks[index - 1]
+        blocks[index].parentId = previous.id
+    }
+
+    func outdentBlock(_ id: UUID) {
+        guard let index = blocks.firstIndex(where: { $0.id == id }) else { return }
+        blocks[index].parentId = nil
+    }
+    
+    func calculateIndentLevel(for block: Block) -> Int {
+        var level = 0
+        var current = block
+        while let parentId = current.parentId,
+              let parent = blocks.first(where: { $0.id == parentId }) {
+            level += 1
+            current = parent
+        }
+        return level
     }
 }
