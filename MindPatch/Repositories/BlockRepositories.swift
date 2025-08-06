@@ -17,7 +17,7 @@ struct BlockRepository {
             return []
         }
 
-        return rawBlocks.map { block in
+        var processedBlocks = rawBlocks.map { block in
             var b = block
             if b.id == UUID(uuidString: "00000000-0000-0000-0000-000000000000") { b.id = UUID() }
             if b.content.isEmpty { b.content = "" }
@@ -31,5 +31,17 @@ struct BlockRepository {
             }
             return b
         }
+
+        // Ensure unassigned board exists
+        if !processedBlocks.contains(where: { $0.id == Block.unassignedBoardId && $0.type == .board }) {
+            processedBlocks.append(Block.unassignedBoard())
+        }
+
+        // Ensure unassigned post exists
+        if !processedBlocks.contains(where: { $0.id == Block.unassignedPostId && $0.type == .post }) {
+            processedBlocks.append(Block.unassignedPost(forBoard: Block.unassignedBoardId))
+        }
+
+        return processedBlocks
     }
 }

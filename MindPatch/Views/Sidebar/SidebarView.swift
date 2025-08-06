@@ -23,7 +23,7 @@ struct SidebarView: View {
         .onAppear {
             let allBlocks = BlockRepository.loadBlocks()
             self.boards = allBlocks
-                .filter { $0.type == .board }
+                .filter { $0.type == .board && $0.id != Block.unassignedBoardId }
                 .map { Board(block: $0) }
         }
     }

@@ -80,7 +80,7 @@ struct TimelineView: View {
                 onDelete: {
                     blocks.removeAll { $0.id == post.id }
                 },
-                focusedBlockId: focusedBlockId,
+                focusedBlockId: $focusedBlockId,
                 updateBlock: { updated in
                     if let index = blocks.firstIndex(where: { $0.id == updated.id }) {
                         blocks[index] = updated
@@ -96,7 +96,7 @@ struct TimelineView: View {
     }
 
     private func postsToDisplay() -> [Block] {
-        blocks.filter { $0.type == .post && (board == nil || $0.boardId == board!.id) }
+        blocks.filter { $0.type == .post && $0.id != Block.unassignedPostId && (board == nil || $0.boardId == board!.id) }
     }
 
     private func blocksForPost(_ postId: UUID) -> [Block] {

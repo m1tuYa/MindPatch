@@ -2,7 +2,7 @@ import SwiftUI
 import PencilKit
 
 struct PostEditorView: View {
-    @Environment(\.dismiss) var dismiss
+    @Environment(\.dismiss) private var dismiss
     @State var post: Block
     @State var blocks: [Block]
     let boardBlock: Block?
@@ -14,8 +14,6 @@ struct PostEditorView: View {
     
 
     var body: some View {
-        // Break up the complex ForEach expression to help type-checking
-        let indexedBlocks = Array(blocks.enumerated())
         return NavigationView {
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
@@ -52,24 +50,52 @@ struct PostEditorView: View {
                         }
                     }
 
-                    ForEach(indexedBlocks, id: \.1.id) { index, block in
-                        BlockView(
-                            block: Binding(
-                                get: { blocks[index] },
-                                set: { newValue in blocks[index] = newValue }
-                            ),
-                            index: index,
-                            indentLevel: 0,
-                            focusedBlockId: $focusedBlockId,
-                            onDelete: { id in blocks.removeAll { $0.id == id } },
-                            onDuplicate: { blk in
-                                var duplicated = blk
-                                duplicated.id = UUID()
-                                blocks.insert(duplicated, at: index + 1)
-                            },
-                            onEnter: { _ in insertNewBlockBelow(block.id) }
-                        )
-                    }
+                    BlockEditorView(
+                        blocks: $blocks,
+                        focusedBlockId: $focusedBlockId,
+                        updateBlock: { updated in
+                            // Match PostView behavior: let BlockEditorView handle updating the @Binding blocks directly
+                            // This closure can be used for persistence if needed, but should not replace the whole struct in array
+                        },
+                        onDuplicate: { blk in
+                            var duplicated = blk
+                            duplicated.id = UUID()
+                            if let idx = blocks.firstIndex(where: { $0.id == blk.id }) {
+                                blocks.insert(duplicated, at: idx + 1)
+                            } else {
+                                blocks.append(duplicated)
+                            }
+                        },
+                        onDelete: { id in
+                            if let idx = blocks.firstIndex(where: { $0.id == id }) {
+                                blocks.remove(at: idx)
+                                if idx > 0 {
+                                    focusedBlockId = blocks[idx - 1].id
+                                } else if !blocks.isEmpty {
+                                    focusedBlockId = blocks.first?.id
+                                } else {
+                                    focusedBlockId = nil
+                                }
+                            }
+                        }
+                    )
+
+                    Spacer()
+                        .frame(maxWidth: .infinity, minHeight: UIScreen.main.bounds.height)
+                        .background(Color.clear)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if let lastBlock = blocks.last {
+                                focusedBlockId = lastBlock.id
+                                // Move cursor to the end of the last block's text
+                                if let idx = blocks.firstIndex(where: { $0.id == lastBlock.id }) {
+                                    // Force SwiftUI to update binding so that cursor goes to end
+                                    var updated = blocks[idx]
+                                    updated.content = blocks[idx].content // no change, just trigger focus
+                                    blocks[idx] = updated
+                                }
+                            }
+                        }
 
                     if isHandwritingMode {
                         GeometryReader { geometry in
@@ -88,6 +114,12 @@ struct PostEditorView: View {
 
                     Spacer(minLength: 32)
                 }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if let lastBlock = blocks.last {
+                        focusedBlockId = lastBlock.id
+                    }
+                }
                 .padding(.horizontal)
             }
             .navigationBarTitleDisplayMode(.inline)
@@ -99,6 +131,25 @@ struct PostEditorView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("ポスト") {
+                        if isHandwritingMode && !canvasView.drawing.bounds.isEmpty {
+                            let fullImage = canvasView.drawing.image(from: canvasView.bounds, scale: UIScreen.main.scale)
+                            if let trimmed = trimBottomTransparent(from: fullImage) {
+                                let filename = saveImageToDocuments(trimmed)
+                                if let lastBlock = blocks.last {
+                                    let imageBlock = Block(
+                                        id: UUID(),
+                                        type: .image,
+                                        content: filename,
+                                        parentId: lastBlock.parentId,
+                                        postId: lastBlock.postId,
+                                        boardId: lastBlock.boardId,
+                                        order: lastBlock.order + 1
+                                    )
+                                    blocks.append(imageBlock)
+                                }
+                            }
+                            canvasView.drawing = PKDrawing()
+                        }
                         onSave(post, blocks)
                         dismiss()
                     }
@@ -121,11 +172,12 @@ struct PostEditorView: View {
         }
     }
 
-    func insertNewBlockBelow(_ id: UUID) {
-        guard let index = blocks.firstIndex(where: { $0.id == id }) else { return }
+    func insertNewBlockBelow(_ id: UUID) -> UUID? {
+        guard let index = blocks.firstIndex(where: { $0.id == id }) else { return nil }
         let current = blocks[index]
+        let newBlockId = UUID()
         let newBlock = Block(
-            id: UUID(),
+            id: newBlockId,
             type: current.type,
             content: "",
             parentId: current.parentId,
@@ -134,6 +186,7 @@ struct PostEditorView: View {
             order: current.order + 1
         )
         blocks.insert(newBlock, at: index + 1)
+        return newBlockId
     }
 
     func toggleHandwritingMode() {
@@ -209,7 +262,7 @@ struct PostEditorView: View {
                 let newBlock = Block(
                     id: UUID(),
                     type: current.type,
-                    content: "新規ブロック",
+                    content: "",
                     parentId: current.parentId,
                     postId: current.postId,
                     boardId: current.boardId,
@@ -262,8 +315,8 @@ struct PostEditorView: View {
                     order: imageBlock.order + 1
                 )
                 blocks.append(textBlock)
-                // Optionally, set focus to the new text block, or nil to keep canvas active
-                focusedBlockId = nil
+                // Set focus to the new text block
+                focusedBlockId = textBlock.id
             }
         }
     }

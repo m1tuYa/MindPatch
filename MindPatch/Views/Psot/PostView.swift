@@ -4,9 +4,9 @@ struct PostView: View {
     let post: Block
     let boardBlock: Block?
     @State private var blocks: [Block]
+    @Binding var focusedBlockId: UUID?
     let onEdit: () -> Void
     let onDelete: () -> Void
-    let focusedBlockId: UUID?
     let updateBlock: (Block) -> Void
     let onDuplicate: (Block) -> Void
 
@@ -16,7 +16,7 @@ struct PostView: View {
         blocks: [Block],
         onEdit: @escaping () -> Void,
         onDelete: @escaping () -> Void,
-        focusedBlockId: UUID?,
+        focusedBlockId: Binding<UUID?>,
         updateBlock: @escaping (Block) -> Void,
         onDuplicate: @escaping (Block) -> Void
     ) {
@@ -25,7 +25,7 @@ struct PostView: View {
         _blocks = State(initialValue: blocks)
         self.onEdit = onEdit
         self.onDelete = onDelete
-        self.focusedBlockId = focusedBlockId
+        self._focusedBlockId = focusedBlockId
         self.updateBlock = updateBlock
         self.onDuplicate = onDuplicate
     }
@@ -72,23 +72,22 @@ struct PostView: View {
                 }
             }
 
-            ForEach(Array(blocks.enumerated()), id: \.1.id) { index, block in
-                BlockView(
-                    block: Binding(
-                        get: { block },
-                        set: { newValue in updateBlock(newValue) }
-                    ),
-                    index: index,
-                    indentLevel: calculateIndentLevel(for: block),
-                    focusedBlockId: .constant(focusedBlockId),
-                    onDelete: { id in onDelete() },
-                    onDuplicate: { blk in onDuplicate(blk) },
-                    onEnter: { _ in insertNewBlockBelow(block.id) },
-                    onShiftEnter: { updateBlockContentWithNewline($0) },
-                    onTab: { indentBlock($0) },
-                    onShiftTab: { outdentBlock($0) }
-                )
-            }
+            BlockEditorView(
+                blocks: $blocks,
+                focusedBlockId: $focusedBlockId,
+                updateBlock: { updated in
+                    if let idx = blocks.firstIndex(where: { $0.id == updated.id }) {
+                        blocks[idx].content = updated.content
+                        blocks[idx].type = updated.type
+                        blocks[idx].parentId = updated.parentId
+                        blocks[idx].postId = updated.postId
+                        blocks[idx].boardId = updated.boardId
+                        blocks[idx].order = updated.order
+                    }
+                },
+                onDuplicate: onDuplicate,
+                onDelete: { _ in onDelete() }
+            )
 
             Divider()
         }
@@ -107,8 +106,8 @@ struct PostView: View {
         }
     }
 
-    func insertNewBlockBelow(_ id: UUID) {
-        guard let index = blocks.firstIndex(where: { $0.id == id }) else { return }
+    func insertNewBlockBelow(_ id: UUID) -> UUID? {
+        guard let index = blocks.firstIndex(where: { $0.id == id }) else { return nil }
         let current = blocks[index]
         let newBlock = Block(
             id: UUID(),
@@ -120,6 +119,7 @@ struct PostView: View {
             order: current.order + 1
         )
         blocks.insert(newBlock, at: index + 1)
+        return newBlock.id
     }
 
     func updateBlockContentWithNewline(_ id: UUID) {

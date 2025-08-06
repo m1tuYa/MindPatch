@@ -2,10 +2,14 @@ import SwiftUI
 
 struct CustomTextView: UIViewRepresentable {
     @Binding var text: String
+    @Binding var isFocused: Bool
     let onEnter: () -> Void
     let onShiftEnter: () -> Void
     let onTab: () -> Void
     let onShiftTab: () -> Void
+    let onDeleteEmpty: () -> Void
+    let onSplitBlock: (_ before: String, _ after: String) -> Void
+    let onMergeOrDelete: (_ isEmpty: Bool) -> Void
 
     func makeUIView(context: Context) -> UITextView {
         let textView = UITextView()
@@ -20,6 +24,15 @@ struct CustomTextView: UIViewRepresentable {
     func updateUIView(_ uiView: UITextView, context: Context) {
         if uiView.text != text {
             uiView.text = text
+        }
+        if isFocused {
+            if !uiView.isFirstResponder {
+                uiView.becomeFirstResponder()
+            }
+        } else {
+            if uiView.isFirstResponder {
+                uiView.resignFirstResponder()
+            }
         }
     }
 
@@ -39,12 +52,31 @@ struct CustomTextView: UIViewRepresentable {
         }
 
         func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+            if text.isEmpty && range.location == 0 {
+                let isEmptyBlock = textView.text.isEmpty
+                // 空ブロック → 削除
+                if isEmptyBlock {
+                    parent.onMergeOrDelete(true)
+                    return false
+                }
+                // 非空ブロック → 文字数が2文字以上のときだけマージ
+                if range.length > 0 && textView.text.count > 1 {
+                    parent.onMergeOrDelete(false)
+                    return false
+                }
+            }
+            // Enter handling
             if text == "\n" {
-                // Simplified shift detection: assume shift+enter adds newline, enter triggers onEnter
-                if textView.text.last == "\n" {
-                    parent.onShiftEnter()
+                let cursorPosition = range.location
+                let currentText = textView.text ?? ""
+                if cursorPosition == currentText.count {
+                    // Cursor at end -> split with empty after
+                    parent.onSplitBlock(currentText, "")
                 } else {
-                    parent.onEnter()
+                    let beforeIndex = currentText.index(currentText.startIndex, offsetBy: cursorPosition)
+                    let before = String(currentText[..<beforeIndex])
+                    let after = String(currentText[beforeIndex...])
+                    parent.onSplitBlock(before, after)
                 }
                 return false
             }
@@ -65,8 +97,12 @@ struct BlockView: View {
     var onShiftEnter: ((UUID) -> Void)? = nil
     var onTab: ((UUID) -> Void)? = nil
     var onShiftTab: ((UUID) -> Void)? = nil
+    var onDeleteEmpty: (() -> Void)? = nil
 
-    init(block: Binding<Block>, index: Int? = nil, indentLevel: Int = 0, focusedBlockId: Binding<UUID?>, onDelete: ((UUID) -> Void)? = nil, onDuplicate: ((Block) -> Void)? = nil, onEnter: ((UUID) -> Void)? = nil, onShiftEnter: ((UUID) -> Void)? = nil, onTab: ((UUID) -> Void)? = nil, onShiftTab: ((UUID) -> Void)? = nil) {
+    var onSplitBlock: ((_ before: String, _ after: String) -> Void)? = nil
+    var onMergeOrDelete: ((_ isEmpty: Bool) -> Void)? = nil
+
+    init(block: Binding<Block>, index: Int? = nil, indentLevel: Int = 0, focusedBlockId: Binding<UUID?>, onDelete: ((UUID) -> Void)? = nil, onDuplicate: ((Block) -> Void)? = nil, onEnter: ((UUID) -> Void)? = nil, onShiftEnter: ((UUID) -> Void)? = nil, onTab: ((UUID) -> Void)? = nil, onShiftTab: ((UUID) -> Void)? = nil, onDeleteEmpty: (() -> Void)? = nil, onSplitBlock: ((_ before: String, _ after: String) -> Void)? = nil, onMergeOrDelete: ((_ isEmpty: Bool) -> Void)? = nil) {
         self._block = block
         self.index = index
         self.indentLevel = indentLevel
@@ -77,6 +113,9 @@ struct BlockView: View {
         self.onShiftEnter = onShiftEnter
         self.onTab = onTab
         self.onShiftTab = onShiftTab
+        self.onDeleteEmpty = onDeleteEmpty
+        self.onSplitBlock = onSplitBlock
+        self.onMergeOrDelete = onMergeOrDelete
     }
 
     var body: some View {
@@ -133,28 +172,79 @@ struct BlockView: View {
                 case .text:
                     CustomTextView(
                         text: $block.content,
-                        onEnter: { onEnter?(block.id) },
+                        isFocused: Binding(
+                            get: { focusedBlockId == block.id },
+                            set: { newValue in
+                                if newValue {
+                                    focusedBlockId = block.id
+                                }
+                            }
+                        ),
+                        onEnter: { onEnter?(block.id) ?? () },
                         onShiftEnter: { onShiftEnter?(block.id) ?? block.content.append("\n") },
                         onTab: { onTab?(block.id) },
-                        onShiftTab: { onShiftTab?(block.id) }
+                        onShiftTab: { onShiftTab?(block.id) },
+                        onDeleteEmpty: {
+                            onDeleteEmpty?()
+                        },
+                        onSplitBlock: { before, after in
+                            onSplitBlock?(before, after)
+                        },
+                        onMergeOrDelete: { isEmpty in
+                            onMergeOrDelete?(isEmpty)
+                        }
                     )
                 case .heading1:
                     CustomTextView(
                         text: $block.content,
-                        onEnter: { onEnter?(block.id) },
+                        isFocused: Binding(
+                            get: { focusedBlockId == block.id },
+                            set: { newValue in
+                                if newValue {
+                                    focusedBlockId = block.id
+                                }
+                            }
+                        ),
+                        onEnter: { onEnter?(block.id) ?? () },
                         onShiftEnter: { onShiftEnter?(block.id) ?? block.content.append("\n") },
                         onTab: { onTab?(block.id) },
-                        onShiftTab: { onShiftTab?(block.id) }
+                        onShiftTab: { onShiftTab?(block.id) },
+                        onDeleteEmpty: {
+                            onDeleteEmpty?()
+                        },
+                        onSplitBlock: { before, after in
+                            onSplitBlock?(before, after)
+                        },
+                        onMergeOrDelete: { isEmpty in
+                            onMergeOrDelete?(isEmpty)
+                        }
                     )
                     .font(.title2)
                     .bold()
                 case .heading2:
                     CustomTextView(
                         text: $block.content,
-                        onEnter: { onEnter?(block.id) },
+                        isFocused: Binding(
+                            get: { focusedBlockId == block.id },
+                            set: { newValue in
+                                if newValue {
+                                    focusedBlockId = block.id
+                                }
+                            }
+                        ),
+                        onEnter: { onEnter?(block.id) ?? () },
                         onShiftEnter: { onShiftEnter?(block.id) ?? block.content.append("\n") },
                         onTab: { onTab?(block.id) },
-                        onShiftTab: { onShiftTab?(block.id) }
+                        onShiftTab: { onShiftTab?(block.id) },
+                        onDeleteEmpty: {
+                            onDeleteEmpty?()
+                        },
+                        onSplitBlock: { before, after in
+                            onSplitBlock?(before, after)
+                        },
+                        onMergeOrDelete: { isEmpty in
+                            onMergeOrDelete?(isEmpty)
+                        }
                     )
                     .font(.title3)
                     .bold()
@@ -163,10 +253,27 @@ struct BlockView: View {
                         Text("•")
                         CustomTextView(
                             text: $block.content,
-                            onEnter: { onEnter?(block.id) },
+                            isFocused: Binding(
+                                get: { focusedBlockId == block.id },
+                                set: { newValue in
+                                    if newValue {
+                                        focusedBlockId = block.id
+                                    }
+                                }
+                            ),
+                            onEnter: { onEnter?(block.id) ?? () },
                             onShiftEnter: { onShiftEnter?(block.id) ?? block.content.append("\n") },
                             onTab: { onTab?(block.id) },
-                            onShiftTab: { onShiftTab?(block.id) }
+                            onShiftTab: { onShiftTab?(block.id) },
+                            onDeleteEmpty: {
+                                onDeleteEmpty?()
+                            },
+                            onSplitBlock: { before, after in
+                                onSplitBlock?(before, after)
+                            },
+                            onMergeOrDelete: { isEmpty in
+                                onMergeOrDelete?(isEmpty)
+                            }
                         )
                     }
                 case .numberedList:
@@ -178,10 +285,27 @@ struct BlockView: View {
                         }
                         CustomTextView(
                             text: $block.content,
-                            onEnter: { onEnter?(block.id) },
+                            isFocused: Binding(
+                                get: { focusedBlockId == block.id },
+                                set: { newValue in
+                                    if newValue {
+                                        focusedBlockId = block.id
+                                    }
+                                }
+                            ),
+                            onEnter: { onEnter?(block.id) ?? () },
                             onShiftEnter: { onShiftEnter?(block.id) ?? block.content.append("\n") },
                             onTab: { onTab?(block.id) },
-                            onShiftTab: { onShiftTab?(block.id) }
+                            onShiftTab: { onShiftTab?(block.id) },
+                            onDeleteEmpty: {
+                                onDeleteEmpty?()
+                            },
+                            onSplitBlock: { before, after in
+                                onSplitBlock?(before, after)
+                            },
+                            onMergeOrDelete: { isEmpty in
+                                onMergeOrDelete?(isEmpty)
+                            }
                         )
                     }
                 case .checkbox:
@@ -189,10 +313,27 @@ struct BlockView: View {
                         Image(systemName: block.props?["checked"]?.value as? Bool == true ? "checkmark.square" : "square")
                         CustomTextView(
                             text: $block.content,
-                            onEnter: { onEnter?(block.id) },
+                            isFocused: Binding(
+                                get: { focusedBlockId == block.id },
+                                set: { newValue in
+                                    if newValue {
+                                        focusedBlockId = block.id
+                                    }
+                                }
+                            ),
+                            onEnter: { onEnter?(block.id) ?? () },
                             onShiftEnter: { onShiftEnter?(block.id) ?? block.content.append("\n") },
                             onTab: { onTab?(block.id) },
-                            onShiftTab: { onShiftTab?(block.id) }
+                            onShiftTab: { onShiftTab?(block.id) },
+                            onDeleteEmpty: {
+                                onDeleteEmpty?()
+                            },
+                            onSplitBlock: { before, after in
+                                onSplitBlock?(before, after)
+                            },
+                            onMergeOrDelete: { isEmpty in
+                                onMergeOrDelete?(isEmpty)
+                            }
                         )
                     }
                 case .image:
