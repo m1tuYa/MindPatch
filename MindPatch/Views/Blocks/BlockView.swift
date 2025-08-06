@@ -13,6 +13,7 @@ struct CustomTextView: UIViewRepresentable {
         textView.font = UIFont.systemFont(ofSize: 16)
         textView.isScrollEnabled = false
         textView.backgroundColor = .clear
+        textView.textContainerInset = .zero
         return textView
     }
 
@@ -194,6 +195,15 @@ struct BlockView: View {
                             onShiftTab: { onShiftTab?(block.id) }
                         )
                     }
+                case .image:
+                    if let uiImage = loadImageFromDocuments(block.content) {
+                        Image(uiImage: uiImage)
+                            .resizable()
+                            .scaledToFit()
+                    } else {
+                        Text("Image not found")
+                            .foregroundColor(.gray)
+                    }
                 default:
                     Text("Unsupported block type")
                         .foregroundColor(.gray)
@@ -205,4 +215,13 @@ struct BlockView: View {
             // No focus state handling for iOS UITextView here
         }
     }
+}
+
+func loadImageFromDocuments(_ filename: String) -> UIImage? {
+    let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    let fileURL = documentsURL.appendingPathComponent(filename)
+    if let data = try? Data(contentsOf: fileURL) {
+        return UIImage(data: data)
+    }
+    return nil
 }

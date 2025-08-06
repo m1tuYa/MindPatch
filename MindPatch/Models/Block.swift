@@ -1,7 +1,7 @@
 import Foundation
 
 enum BlockType: String, Codable {
-    case board, post, text, heading1, heading2, list, checkbox, numberedList
+    case board, post, text, heading1, heading2, list, checkbox, numberedList, image
 }
 
 extension Block {
