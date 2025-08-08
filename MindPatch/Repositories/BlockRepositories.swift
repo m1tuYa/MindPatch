@@ -1,11 +1,43 @@
 import Foundation
 
 struct BlockRepository {
+    static func documentDirectoryURL() -> URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    }
+
+    static func documentFileURL() -> URL {
+        documentDirectoryURL().appendingPathComponent("blockData.json")
+    }
+
+    static func loadBlocksFromDocumentDirectory() -> [Block]? {
+        let url = documentFileURL()
+
+        if !FileManager.default.fileExists(atPath: url.path) {
+            return nil
+        }
+
+        do {
+            let data = try Data(contentsOf: url)
+            let blocks = try JSONDecoder().decode([Block].self, from: data)
+            return blocks
+        } catch {
+            return nil
+        }
+    }
+
+    static func saveBlocksToDocumentDirectory(_ blocks: [Block]) {
+        let url = documentFileURL()
+        do {
+            let data = try JSONEncoder().encode(blocks)
+            try data.write(to: url)
+        } catch {
+        }
+    }
+
     static func loadBlocks() -> [Block] {
         guard let url = Bundle.main.url(forResource: "sampleBlockData", withExtension: "json"),
               let data = try? Data(contentsOf: url)
         else {
-            print("Failed to load sampleBlockData.json")
             return []
         }
 
@@ -13,7 +45,6 @@ struct BlockRepository {
         decoder.dateDecodingStrategy = .iso8601
 
         guard let rawBlocks = try? decoder.decode([Block].self, from: data) else {
-            print("Failed to decode sampleBlockData.json")
             return []
         }
 

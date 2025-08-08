@@ -7,8 +7,8 @@ struct PostView: View {
     @Binding var focusedBlockId: UUID?
     let onEdit: () -> Void
     let onDelete: () -> Void
-    let updateBlock: (Block) -> Void
     let onDuplicate: (Block) -> Void
+    let saveBlocks: () -> Void
 
     public init(
         post: Block,
@@ -17,8 +17,8 @@ struct PostView: View {
         onEdit: @escaping () -> Void,
         onDelete: @escaping () -> Void,
         focusedBlockId: Binding<UUID?>,
-        updateBlock: @escaping (Block) -> Void,
-        onDuplicate: @escaping (Block) -> Void
+        onDuplicate: @escaping (Block) -> Void,
+        saveBlocks: @escaping () -> Void
     ) {
         self.post = post
         self.boardBlock = boardBlock
@@ -26,8 +26,8 @@ struct PostView: View {
         self.onEdit = onEdit
         self.onDelete = onDelete
         self._focusedBlockId = focusedBlockId
-        self.updateBlock = updateBlock
         self.onDuplicate = onDuplicate
+        self.saveBlocks = saveBlocks
     }
 
     @State private var isPresentingEditor = false
@@ -48,7 +48,7 @@ struct PostView: View {
                         set: { newValue in
                             var updated = post
                             updated.content = newValue
-                            updateBlock(updated)
+                            try? saveBlocks()
                         })
                     )
                     .font(.title2)
@@ -75,18 +75,12 @@ struct PostView: View {
             BlockEditorView(
                 blocks: $blocks,
                 focusedBlockId: $focusedBlockId,
-                updateBlock: { updated in
-                    if let idx = blocks.firstIndex(where: { $0.id == updated.id }) {
-                        blocks[idx].content = updated.content
-                        blocks[idx].type = updated.type
-                        blocks[idx].parentId = updated.parentId
-                        blocks[idx].postId = updated.postId
-                        blocks[idx].boardId = updated.boardId
-                        blocks[idx].order = updated.order
-                    }
-                },
                 onDuplicate: onDuplicate,
-                onDelete: { _ in onDelete() }
+                onDelete: { _ in
+                    onDelete()
+                    saveBlocks()
+                },
+                saveBlocks: saveBlocks
             )
 
             Divider()
@@ -97,11 +91,11 @@ struct PostView: View {
                 post: post,
                 blocks: blocks,
                 boardBlock: boardBlock,
-                onSave: { updatedPost, updatedBlocks in
-                    updateBlock(updatedPost)
-                    updatedBlocks.forEach(updateBlock)
+                onSave: { _, _ in
+                    saveBlocks()
                     isPresentingEditor = false
-                }
+                },
+                saveBlocks: saveBlocks
             )
         }
     }
@@ -120,11 +114,6 @@ struct PostView: View {
         )
         blocks.insert(newBlock, at: index + 1)
         return newBlock.id
-    }
-
-    func updateBlockContentWithNewline(_ id: UUID) {
-        guard let index = blocks.firstIndex(where: { $0.id == id }) else { return }
-        blocks[index].content.append("\n")
     }
 
     func indentBlock(_ id: UUID) {

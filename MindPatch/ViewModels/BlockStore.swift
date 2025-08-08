@@ -5,11 +5,20 @@ class BlockStore: ObservableObject {
     @Published var blocks: [Block] = []
 
     init() {
-        loadSample()
+        loadBlocks()
     }
 
-    func loadSample() {
-        self.blocks = BlockRepository.loadBlocks()
+    func loadBlocks() {
+        if let savedBlocks = BlockRepository.loadBlocksFromDocumentDirectory() {
+            self.blocks = savedBlocks
+        } else {
+            self.blocks = BlockRepository.loadBlocks()
+            BlockRepository.saveBlocksToDocumentDirectory(self.blocks)
+        }
+    }
+
+    func saveBlocks() {
+        BlockRepository.saveBlocksToDocumentDirectory(self.blocks)
     }
 
     func addBlock(content: String, parentId: UUID? = nil) {
@@ -32,16 +41,11 @@ class BlockStore: ObservableObject {
             props: nil
         )
         blocks.append(newBlock)
-    }
-
-    func updateBlock(id: UUID, newContent: String) {
-        if let index = blocks.firstIndex(where: { $0.id == id }) {
-            blocks[index].content = newContent
-            blocks[index].updatedAt = Date()
-        }
+        saveBlocks()
     }
 
     func deleteBlock(id: UUID) {
         blocks.removeAll { $0.id == id }
+        saveBlocks()
     }
 }

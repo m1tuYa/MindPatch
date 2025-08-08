@@ -28,11 +28,15 @@ struct CustomTextView: UIViewRepresentable {
         }
         if isFocused {
             if !uiView.isFirstResponder {
-                uiView.becomeFirstResponder()
+                DispatchQueue.main.async {
+                    uiView.becomeFirstResponder()
+                }
             }
         } else {
             if uiView.isFirstResponder {
-                uiView.resignFirstResponder()
+                DispatchQueue.main.async {
+                    uiView.resignFirstResponder()
+                }
             }
         }
     }

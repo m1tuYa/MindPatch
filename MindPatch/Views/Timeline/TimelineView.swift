@@ -3,7 +3,7 @@ import Foundation
 
 struct TimelineView: View {
     let board: Board?
-    @State private var blocks: [Block] = []
+    @ObservedObject var blockStore: BlockStore
     @State private var focusedBlockId: UUID? = nil
     @State private var isPresentingPostEditor = false
     @State private var draftPost = Block.emptyPost()
@@ -49,9 +49,6 @@ struct TimelineView: View {
                 }
             }
         }
-        .onAppear {
-            blocks = BlockRepository.loadBlocks()
-        }
         .sheet(isPresented: $isPresentingPostEditor) {
             ZStack {
                 Color.white.ignoresSafeArea()
@@ -60,8 +57,12 @@ struct TimelineView: View {
                     blocks: draftBlocks,
                     boardBlock: boardBlock(for: draftPost.boardId),
                     onSave: { newPost, newBlocks in
-                        blocks.append(newPost)
-                        blocks.append(contentsOf: newBlocks)
+                        blockStore.blocks.append(newPost)
+                        blockStore.blocks.append(contentsOf: newBlocks)
+                        blockStore.saveBlocks()
+                    },
+                    saveBlocks: {
+                        blockStore.saveBlocks()
                     }
                 )
             }
@@ -78,33 +79,31 @@ struct TimelineView: View {
                     // Implement edit functionality here if needed
                 },
                 onDelete: {
-                    blocks.removeAll { $0.id == post.id }
+                    blockStore.blocks.removeAll { $0.id == post.id }
                 },
                 focusedBlockId: $focusedBlockId,
-                updateBlock: { updated in
-                    if let index = blocks.firstIndex(where: { $0.id == updated.id }) {
-                        blocks[index] = updated
-                    }
-                },
                 onDuplicate: { duplicated in
                     var newBlock = duplicated
                     newBlock.id = UUID()
-                    blocks.append(newBlock)
+                    blockStore.blocks.append(newBlock)
+                },
+                saveBlocks: {
+                    blockStore.saveBlocks()
                 }
             )
         }
     }
 
     private func postsToDisplay() -> [Block] {
-        blocks.filter { $0.type == .post && $0.id != Block.unassignedPostId && (board == nil || $0.boardId == board!.id) }
+        blockStore.blocks.filter { $0.type == .post && $0.id != Block.unassignedPostId && (board == nil || $0.boardId == board!.id) }
     }
 
     private func blocksForPost(_ postId: UUID) -> [Block] {
-        blocks.filter { $0.postId == postId && $0.type != .post && $0.type != .board }
+        blockStore.blocks.filter { $0.postId == postId && $0.type != .post && $0.type != .board }
     }
 
     private func boardBlock(for boardId: UUID?) -> Block? {
         guard let boardId = boardId else { return nil }
-        return blocks.first { $0.id == boardId && $0.type == .board }
+        return blockStore.blocks.first { $0.id == boardId && $0.type == .board }
     }
 }

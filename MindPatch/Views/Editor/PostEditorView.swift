@@ -7,11 +7,11 @@ struct PostEditorView: View {
     @State var blocks: [Block]
     let boardBlock: Block?
     let onSave: (Block, [Block]) -> Void
+    let saveBlocks: () -> Void
 
     @State private var focusedBlockId: UUID?
     @State private var isHandwritingMode = false
     @State private var canvasView = PKCanvasView()
-    
 
     var body: some View {
         return NavigationView {
@@ -57,10 +57,6 @@ struct PostEditorView: View {
                     BlockEditorView(
                         blocks: $blocks,
                         focusedBlockId: $focusedBlockId,
-                        updateBlock: { updated in
-                            // Match PostView behavior: let BlockEditorView handle updating the @Binding blocks directly
-                            // This closure can be used for persistence if needed, but should not replace the whole struct in array
-                        },
                         onDuplicate: { blk in
                             var duplicated = blk
                             duplicated.id = UUID()
@@ -69,6 +65,7 @@ struct PostEditorView: View {
                             } else {
                                 blocks.append(duplicated)
                             }
+                            saveBlocks()
                         },
                         onDelete: { id in
                             if let idx = blocks.firstIndex(where: { $0.id == id }) {
@@ -80,8 +77,10 @@ struct PostEditorView: View {
                                 } else {
                                     focusedBlockId = nil
                                 }
+                                saveBlocks()
                             }
-                        }
+                        },
+                        saveBlocks: saveBlocks
                     )
 
                     if !isHandwritingMode {
@@ -138,7 +137,6 @@ struct PostEditorView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("ポスト") {
                         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                        updateBlock()
                         if isHandwritingMode && !canvasView.drawing.bounds.isEmpty {
                             let fullImage = canvasView.drawing.image(from: canvasView.bounds, scale: UIScreen.main.scale)
                             if let trimmed = trimBottomTransparent(from: fullImage) {
@@ -173,7 +171,6 @@ struct PostEditorView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
                         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                        updateBlock()
                         addNewBlockAction()
                     } label: {
                         Image(systemName: "plus")
@@ -197,11 +194,11 @@ struct PostEditorView: View {
             order: current.order + 1
         )
         blocks.insert(newBlock, at: index + 1)
+        saveBlocks()
         return newBlockId
     }
 
     func toggleHandwritingMode() {
-        updateBlock()
         if isHandwritingMode {
             // ON → OFF: 保存処理
             let fullImage = canvasView.drawing.image(from: canvasView.bounds, scale: UIScreen.main.scale)
@@ -218,6 +215,7 @@ struct PostEditorView: View {
                         order: lastBlock.order + 1
                     )
                     blocks.append(imageBlock)
+                    saveBlocks()
                 }
             }
             canvasView.drawing = PKDrawing()
@@ -282,6 +280,7 @@ struct PostEditorView: View {
                 )
                 blocks.insert(newBlock, at: index + 1)
                 focusedBlockId = newBlock.id
+                saveBlocks()
             } else {
                 // Append a new text block with placeholder text at the end and focus it
                 let lastBlock = blocks.last
@@ -296,6 +295,7 @@ struct PostEditorView: View {
                 )
                 blocks.append(newBlock)
                 focusedBlockId = newBlock.id
+                saveBlocks()
             }
         } else if isHandwritingMode {
             // Save current canvas as image block, clear canvas, then insert a new text block after the image block, and show fresh canvas
@@ -329,24 +329,11 @@ struct PostEditorView: View {
                 blocks.append(textBlock)
                 // Set focus to the new text block
                 focusedBlockId = textBlock.id
+                saveBlocks()
             }
         }
     }
 
-    func updateBlock() {
-        if let id = focusedBlockId, let index = blocks.firstIndex(where: { $0.id == id }) {
-            let original = blocks[index]
-            blocks[index] = Block(
-                id: original.id,
-                type: original.type,
-                content: original.content,
-                parentId: original.parentId,
-                postId: original.postId,
-                boardId: original.boardId,
-                order: original.order
-            )
-        }
-    }
 }
 
 struct HandwritingCanvasView: UIViewRepresentable {
