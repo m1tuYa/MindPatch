@@ -10,6 +10,7 @@ struct CustomTextView: UIViewRepresentable {
     let onDeleteEmpty: () -> Void
     let onSplitBlock: (_ before: String, _ after: String) -> Void
     let onMergeOrDelete: (_ isEmpty: Bool) -> Void
+    let onTextChange: ((String) -> Void)?
 
     func makeUIView(context: Context) -> UITextView {
         let textView = UITextView()
@@ -49,6 +50,12 @@ struct CustomTextView: UIViewRepresentable {
 
         func textViewDidChange(_ textView: UITextView) {
             parent.text = textView.text
+            parent.onTextChange?(textView.text)
+        }
+
+        func textViewDidEndEditing(_ textView: UITextView) {
+            parent.text = textView.text
+            // Optionally notify for update if needed
         }
 
         func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
@@ -192,6 +199,9 @@ struct BlockView: View {
                         },
                         onMergeOrDelete: { isEmpty in
                             onMergeOrDelete?(isEmpty)
+                        },
+                        onTextChange: { newText in
+                            block.content = newText
                         }
                     )
                 case .heading1:
@@ -217,6 +227,9 @@ struct BlockView: View {
                         },
                         onMergeOrDelete: { isEmpty in
                             onMergeOrDelete?(isEmpty)
+                        },
+                        onTextChange: { newText in
+                            block.content = newText
                         }
                     )
                     .font(.title2)
@@ -244,6 +257,9 @@ struct BlockView: View {
                         },
                         onMergeOrDelete: { isEmpty in
                             onMergeOrDelete?(isEmpty)
+                        },
+                        onTextChange: { newText in
+                            block.content = newText
                         }
                     )
                     .font(.title3)
@@ -273,6 +289,9 @@ struct BlockView: View {
                             },
                             onMergeOrDelete: { isEmpty in
                                 onMergeOrDelete?(isEmpty)
+                            },
+                            onTextChange: { newText in
+                                block.content = newText
                             }
                         )
                     }
@@ -305,6 +324,9 @@ struct BlockView: View {
                             },
                             onMergeOrDelete: { isEmpty in
                                 onMergeOrDelete?(isEmpty)
+                            },
+                            onTextChange: { newText in
+                                block.content = newText
                             }
                         )
                     }
@@ -333,6 +355,9 @@ struct BlockView: View {
                             },
                             onMergeOrDelete: { isEmpty in
                                 onMergeOrDelete?(isEmpty)
+                            },
+                            onTextChange: { newText in
+                                block.content = newText
                             }
                         )
                     }
@@ -352,8 +377,11 @@ struct BlockView: View {
             }
         }
         .padding(.leading, CGFloat(indentLevel) * 20)
-        .onChange(of: focusedBlockId) { _, newValue in
-            // No focus state handling for iOS UITextView here
+        .onChange(of: focusedBlockId) { oldValue, newValue in
+            if oldValue == block.id && newValue != block.id {
+                // Focus lost -> persist changes (trigger state update)
+                block.content = block.content
+            }
         }
     }
 }

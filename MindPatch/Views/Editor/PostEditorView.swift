@@ -26,7 +26,11 @@ struct PostEditorView: View {
                         }
 
                         HStack(alignment: .center, spacing: 4) {
-                            TextField("ポストの内容", text: $post.content)
+                            TextField("ポストの内容", text: $post.content, onEditingChanged: { editing in
+                                if editing {
+                                    focusedBlockId = nil
+                                }
+                            })
                                 .font(.title2)
                                 .bold()
 
@@ -80,22 +84,24 @@ struct PostEditorView: View {
                         }
                     )
 
-                    Spacer()
-                        .frame(maxWidth: .infinity, minHeight: UIScreen.main.bounds.height)
-                        .background(Color.clear)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            if let lastBlock = blocks.last {
-                                focusedBlockId = lastBlock.id
-                                // Move cursor to the end of the last block's text
-                                if let idx = blocks.firstIndex(where: { $0.id == lastBlock.id }) {
-                                    // Force SwiftUI to update binding so that cursor goes to end
-                                    var updated = blocks[idx]
-                                    updated.content = blocks[idx].content // no change, just trigger focus
-                                    blocks[idx] = updated
+                    if !isHandwritingMode {
+                        Spacer()
+                            .frame(maxWidth: .infinity, minHeight: UIScreen.main.bounds.height)
+                            .background(Color.clear)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                if let lastBlock = blocks.last {
+                                    focusedBlockId = lastBlock.id
+                                    // Move cursor to the end of the last block's text
+                                    if let idx = blocks.firstIndex(where: { $0.id == lastBlock.id }) {
+                                        // Force SwiftUI to update binding so that cursor goes to end
+                                        var updated = blocks[idx]
+                                        updated.content = blocks[idx].content // no change, just trigger focus
+                                        blocks[idx] = updated
+                                    }
                                 }
                             }
-                        }
+                    }
 
                     if isHandwritingMode {
                         GeometryReader { geometry in
@@ -131,6 +137,8 @@ struct PostEditorView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("ポスト") {
+                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                        updateBlock()
                         if isHandwritingMode && !canvasView.drawing.bounds.isEmpty {
                             let fullImage = canvasView.drawing.image(from: canvasView.bounds, scale: UIScreen.main.scale)
                             if let trimmed = trimBottomTransparent(from: fullImage) {
@@ -156,6 +164,7 @@ struct PostEditorView: View {
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
+                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                         toggleHandwritingMode()
                     } label: {
                         Image(systemName: isHandwritingMode ? "pencil.slash" : "pencil")
@@ -163,6 +172,8 @@ struct PostEditorView: View {
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
+                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                        updateBlock()
                         addNewBlockAction()
                     } label: {
                         Image(systemName: "plus")
@@ -190,6 +201,7 @@ struct PostEditorView: View {
     }
 
     func toggleHandwritingMode() {
+        updateBlock()
         if isHandwritingMode {
             // ON → OFF: 保存処理
             let fullImage = canvasView.drawing.image(from: canvasView.bounds, scale: UIScreen.main.scale)
@@ -318,6 +330,21 @@ struct PostEditorView: View {
                 // Set focus to the new text block
                 focusedBlockId = textBlock.id
             }
+        }
+    }
+
+    func updateBlock() {
+        if let id = focusedBlockId, let index = blocks.firstIndex(where: { $0.id == id }) {
+            let original = blocks[index]
+            blocks[index] = Block(
+                id: original.id,
+                type: original.type,
+                content: original.content,
+                parentId: original.parentId,
+                postId: original.postId,
+                boardId: original.boardId,
+                order: original.order
+            )
         }
     }
 }
