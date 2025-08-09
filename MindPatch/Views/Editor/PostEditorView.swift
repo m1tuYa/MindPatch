@@ -1,9 +1,26 @@
 import SwiftUI
 import PencilKit
 
+private struct _ViewFrameKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
+}
+private extension View {
+    func _onGlobalFrameChange(_ handler: @escaping (CGRect) -> Void) -> some View {
+        background(
+            GeometryReader { proxy in
+                Color.clear
+                    .preference(key: _ViewFrameKey.self, value: proxy.frame(in: .global))
+            }
+        )
+        .onPreferenceChange(_ViewFrameKey.self, perform: handler)
+    }
+}
+
 struct PostEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var blockStore: BlockStore
+    // @Environment(\.safeAreaInsets) private var safeAreaInsets
     @State var post: Block
     /// 新規ポスト作成遷移かどうか（既存編集のときは false のまま）
     let isNew: Bool
@@ -26,6 +43,11 @@ struct PostEditorView: View {
     @State private var isHandwritingMode = false
     @State private var canvasView = PKCanvasView()
     @FocusState private var titleFocusedInternal: Bool
+
+    @State private var showBoardPopover = false
+    @State private var boardIconFrame: CGRect = .zero
+
+    private let topThreshold: CGFloat = 120
 
     // MARK: - Unified block insertion entrypoints
     private enum AddTrigger { case titleEnter, emptyTap, plusButton }
@@ -95,6 +117,45 @@ struct PostEditorView: View {
         blockStore.saveBlocks()
     }
 
+    private var availableBoards: [Board] {
+        blockStore.blocks
+            .filter { $0.type == .board }
+            .map { Board(block: $0) }
+    }
+
+    private func assignPostAndBlocks(to boardId: UUID) {
+        // update local state first
+        post.boardId = boardId
+        blockStore.replace(post)
+        // update blocks under this post
+        let ids = blockStore.blocks.filter { $0.postId == post.id }.map { $0.id }
+        for id in ids {
+            if let idx = blockStore.index(of: id) {
+                var b = blockStore.blocks[idx]
+                b.boardId = boardId
+                blockStore.replace(b)
+            }
+        }
+        blockStore.saveBlocks()
+      }
+
+    private func createBoard(title: String, iconUrl: String?) -> Block? {
+        guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        let board = Block(
+            id: UUID(),
+            type: .board,
+            content: title,
+            parentId: nil,
+            postId: nil,
+            boardId: nil,
+            order: 0
+        )
+        // If your Block supports props assignment for iconUrl, wire it here later.
+        blockStore.add(board)
+        blockStore.saveBlocks()
+        return board
+    }
+
     private var blocksForPost: [Block] {
         blockStore.blocks.filter { $0.postId == post.id }
     }
@@ -104,11 +165,40 @@ struct PostEditorView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .center, spacing: 8) {
-                        if let boardBlock {
-                            Board(block: boardBlock).iconImage
-                                .resizable()
-                                .frame(width: 28, height: 28)
-                                .clipShape(Circle())
+                        Button {
+                            showBoardPopover.toggle()
+                        } label: {
+                            if let boardBlock {
+                                Board(block: boardBlock).iconImage
+                                    .resizable()
+                                    .frame(width: 28, height: 28)
+                                    .clipShape(Circle())
+                            } else {
+                                Image(systemName: "folder")
+                                    .resizable()
+                                    .frame(width: 28, height: 28)
+                                    .clipShape(Circle())
+                            }
+                        }
+                        ._onGlobalFrameChange { rect in
+                            boardIconFrame = rect
+                        }
+                        .buttonStyle(.plain)
+                        .popover(
+                            isPresented: $showBoardPopover,
+                            attachmentAnchor: .rect(.bounds),
+                            arrowEdge: (boardIconFrame.minY < topThreshold ? .top : .bottom)
+                        ) {
+                            BoardPickerPopover(
+                                post: post,
+                                onPicked: { boardId in
+                                    assignPostAndBlocks(to: boardId)
+                                    showBoardPopover = false
+                                }
+                            )
+                            .environmentObject(blockStore)
+                            .frame(minWidth: 260)
+                            .padding(.vertical, 8)
                         }
 
                         HStack(alignment: .center, spacing: 4) {
@@ -124,8 +214,8 @@ struct PostEditorView: View {
                                 }
                                 .font(.title2)
                                 .bold()
-                                .onChange(of: focusedBlockId) { _, newId in
-                                    titleFocusedInternal = (newId == post.id)
+                                .onChange(of: focusedBlockId) { _, newValue in
+                                    titleFocusedInternal = (newValue == post.id)
                                 }
 
                             Text((post.createdAt ?? Date()).formatted(.dateTime.year().month().day().hour().minute()))
@@ -259,6 +349,8 @@ struct PostEditorView: View {
         }
     }
 
+    // Helper methods for PostEditorView
+
     func insertNewBlockBelow(_ id: UUID) -> UUID? {
         guard let index = blockStore.blocks.firstIndex(where: { $0.id == id && $0.postId == post.id }) else { return nil }
         let current = blockStore.blocks[index]
@@ -339,8 +431,6 @@ struct PostEditorView: View {
         }
         return filename
     }
-
-
 }
 
 struct HandwritingCanvasView: UIViewRepresentable {
@@ -353,4 +443,97 @@ struct HandwritingCanvasView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: PKCanvasView, context: Context) {}
+}
+
+private struct BoardPickerPopover: View {
+    @EnvironmentObject var blockStore: BlockStore
+    let post: Block
+    let onPicked: (UUID) -> Void
+
+    @State private var editingBoardId: UUID?
+    @FocusState private var focusedBoardTitleId: UUID?
+
+    private var availableBoards: [Board] {
+        blockStore.blocks
+            .filter { $0.type == .board }
+            .map { Board(block: $0) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(availableBoards) { board in
+                HStack(spacing: 8) {
+                    board.iconImage
+                        .resizable()
+                        .frame(width: 20, height: 20)
+                        .clipShape(Circle())
+
+                    if editingBoardId == board.id {
+                        TextField(
+                            "ボード名",
+                            text: Binding(
+                                get: {
+                                    if let idx = blockStore.index(of: board.id) {
+                                        return blockStore.blocks[idx].content
+                                    }
+                                    return board.title
+                                },
+                                set: { newValue in
+                                    if let idx = blockStore.index(of: board.id) {
+                                        var b = blockStore.blocks[idx]
+                                        b.content = newValue
+                                        blockStore.replace(b)
+                                    }
+                                }
+                            )
+                        )
+                        .focused($focusedBoardTitleId, equals: board.id)
+                        .onAppear { focusedBoardTitleId = board.id }
+                    } else {
+                        Text(board.title)
+                            .onTapGesture { onPicked(board.id) }
+                    }
+                }
+                .contentShape(Rectangle())
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color(.secondarySystemBackground))
+                        .opacity(0.0001)
+                )
+            }
+
+            Divider().padding(.vertical, 4)
+
+            Button {
+                let newId = createBoardAndBeginEditing()
+                if let bid = newId {
+                    onPicked(bid)
+                    editingBoardId = bid
+                    focusedBoardTitleId = bid
+                }
+            } label: {
+                Label("新規ボード", systemImage: "plus")
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 8)
+        }
+        .padding(.horizontal, 4)
+    }
+
+    private func createBoardAndBeginEditing() -> UUID? {
+        let board = Block(
+            id: UUID(),
+            type: .board,
+            content: "新規ボード",
+            parentId: nil,
+            postId: nil,
+            boardId: nil,
+            order: 0
+        )
+        blockStore.add(board)
+        blockStore.saveBlocks()
+        return board.id
+    }
 }

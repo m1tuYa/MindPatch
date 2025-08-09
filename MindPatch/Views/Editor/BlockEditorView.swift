@@ -1,4 +1,3 @@
-
 import SwiftUI
 
 struct BlockEditorView: View {
@@ -40,7 +39,17 @@ struct BlockEditorView: View {
         )
         let movePosBinding = Binding<Int?>(
             get: { moveCaretTarget?.id == block.id ? moveCaretTarget?.pos : nil },
-            set: { newValue in if newValue == nil, moveCaretTarget?.id == block.id { moveCaretTarget = nil } }
+            set: { newValue in
+                if newValue == nil, moveCaretTarget?.id == block.id {
+                    // Defer state mutation to the next runloop to avoid
+                    // "Modifying state during view update" warnings.
+                    DispatchQueue.main.async {
+                        if moveCaretTarget?.id == block.id {
+                            moveCaretTarget = nil
+                        }
+                    }
+                }
+            }
         )
         BlockView(
             block: binding,
