@@ -49,6 +49,27 @@ extension Block {
         )
     }
 
+    static func placeholder(id: UUID) -> Block {
+        Block(
+            id: id,
+            type: .text,
+            content: "",
+            parentId: nil,
+            postId: nil,
+            boardId: Block.unassignedBoardId,
+            listGroupId: nil,
+            order: 0,
+            createdAt: Date(),
+            updatedAt: Date(),
+            status: "placeholder",
+            tags: [],
+            isPinned: false,
+            isCollapsed: false,
+            style: nil,
+            props: [:]
+        )
+    }
+
     static func unassignedPost(forBoard boardId: UUID) -> Block {
         Block(
             id: unassignedPostId,

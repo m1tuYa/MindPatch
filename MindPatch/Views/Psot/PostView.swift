@@ -1,33 +1,16 @@
 import SwiftUI
 
 struct PostView: View {
+    @EnvironmentObject var blockStore: BlockStore
     let post: Block
     let boardBlock: Block?
-    @State private var blocks: [Block]
     @Binding var focusedBlockId: UUID?
     let onEdit: () -> Void
     let onDelete: () -> Void
     let onDuplicate: (Block) -> Void
-    let saveBlocks: () -> Void
 
-    public init(
-        post: Block,
-        boardBlock: Block?,
-        blocks: [Block],
-        onEdit: @escaping () -> Void,
-        onDelete: @escaping () -> Void,
-        focusedBlockId: Binding<UUID?>,
-        onDuplicate: @escaping (Block) -> Void,
-        saveBlocks: @escaping () -> Void
-    ) {
-        self.post = post
-        self.boardBlock = boardBlock
-        _blocks = State(initialValue: blocks)
-        self.onEdit = onEdit
-        self.onDelete = onDelete
-        self._focusedBlockId = focusedBlockId
-        self.onDuplicate = onDuplicate
-        self.saveBlocks = saveBlocks
+    private var blocksForPost: [Block] {
+        blockStore.blocks.filter { $0.postId == post.id }
     }
 
     @State private var isPresentingEditor = false
@@ -48,11 +31,13 @@ struct PostView: View {
                         set: { newValue in
                             var updated = post
                             updated.content = newValue
-                            try? saveBlocks()
+                            blockStore.replace(updated)
                         })
                     )
                     .font(.title2)
                     .bold()
+                    .simultaneousGesture(TapGesture().onEnded { focusedBlockId = post.id })
+                    .onSubmit { addBlockFromTitle() }
 
                     Text((post.createdAt ?? Date()).formatted(.dateTime.year().month().day().hour().minute()))
                         .font(.caption)
@@ -73,14 +58,13 @@ struct PostView: View {
             }
 
             BlockEditorView(
-                blocks: $blocks,
+                postId: post.id,
                 focusedBlockId: $focusedBlockId,
                 onDuplicate: onDuplicate,
                 onDelete: { _ in
                     onDelete()
-                    saveBlocks()
-                },
-                saveBlocks: saveBlocks
+                    blockStore.saveBlocks()
+                }
             )
 
             Divider()
@@ -89,49 +73,53 @@ struct PostView: View {
         .sheet(isPresented: $isPresentingEditor) {
             PostEditorView(
                 post: post,
-                blocks: blocks,
                 boardBlock: boardBlock,
                 onSave: { _, _ in
-                    saveBlocks()
+                    blockStore.saveBlocks()
                     isPresentingEditor = false
-                },
-                saveBlocks: saveBlocks
+                }
             )
         }
     }
 
     func insertNewBlockBelow(_ id: UUID) -> UUID? {
-        guard let index = blocks.firstIndex(where: { $0.id == id }) else { return nil }
-        let current = blocks[index]
-        let newBlock = Block(
-            id: UUID(),
-            type: current.type,
-            content: "",
-            parentId: current.parentId,
-            postId: current.postId,
-            boardId: current.boardId,
-            order: current.order + 1
-        )
-        blocks.insert(newBlock, at: index + 1)
+        guard let currentIdx = blockStore.index(of: id),
+              blockStore.blocks[currentIdx].postId == post.id else { return nil }
+        let current = blockStore.blocks[currentIdx]
+        var newBlock = blockStore.createBlock(for: post.id, type: current.type)
+        newBlock.order = current.order + 1
+        blockStore.replace(newBlock)
         return newBlock.id
     }
 
+    private func addBlockFromTitle() {
+        // Persist the latest title text
+        blockStore.replace(post)
+        // Create a block right under the title and focus it
+        let newBlock = blockStore.createBlockAtStart(for: post.id, type: .text)
+        focusedBlockId = newBlock.id
+        blockStore.saveBlocks()
+    }
+
     func indentBlock(_ id: UUID) {
-        guard let index = blocks.firstIndex(where: { $0.id == id }), index > 0 else { return }
-        let previous = blocks[index - 1]
-        blocks[index].parentId = previous.id
+        guard let idx = blockStore.index(of: id),
+              blockStore.blocks[idx].postId == post.id,
+              let prevIdx = blockStore.blocks[..<idx].lastIndex(where: { $0.postId == post.id })
+        else { return }
+        let prev = blockStore.blocks[prevIdx]
+        blockStore.setParent(of: id, to: prev.id)
     }
 
     func outdentBlock(_ id: UUID) {
-        guard let index = blocks.firstIndex(where: { $0.id == id }) else { return }
-        blocks[index].parentId = nil
+        guard let _ = blockStore.index(of: id) else { return }
+        blockStore.setParent(of: id, to: nil)
     }
-    
+
     func calculateIndentLevel(for block: Block) -> Int {
         var level = 0
         var current = block
-        while let parentId = current.parentId,
-              let parent = blocks.first(where: { $0.id == parentId }) {
+        while let pid = current.parentId,
+              let parent = blocksForPost.first(where: { $0.id == pid }) {
             level += 1
             current = parent
         }

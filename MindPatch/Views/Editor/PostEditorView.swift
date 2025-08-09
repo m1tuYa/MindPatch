@@ -3,15 +3,101 @@ import PencilKit
 
 struct PostEditorView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var blockStore: BlockStore
     @State var post: Block
-    @State var blocks: [Block]
+    /// 新規ポスト作成遷移かどうか（既存編集のときは false のまま）
+    let isNew: Bool
     let boardBlock: Block?
     let onSave: (Block, [Block]) -> Void
-    let saveBlocks: () -> Void
+
+    init(
+        post: Block,
+        isNew: Bool = false,
+        boardBlock: Block?,
+        onSave: @escaping (Block, [Block]) -> Void
+    ) {
+        self._post = State(initialValue: post)
+        self.isNew = isNew
+        self.boardBlock = boardBlock
+        self.onSave = onSave
+    }
 
     @State private var focusedBlockId: UUID?
     @State private var isHandwritingMode = false
     @State private var canvasView = PKCanvasView()
+    @FocusState private var titleFocusedInternal: Bool
+
+    // MARK: - Unified block insertion entrypoints
+    private enum AddTrigger { case titleEnter, emptyTap, plusButton }
+
+    /// タイトル Enter / 空白タップ / プラスボタン すべての入口をここに集約
+    private func addBlock(trigger: AddTrigger) {
+        // 新規ポスト作成時にタイトルへフォーカスしている場合、必要ならポストを先に保存
+        if trigger == .titleEnter || trigger == .emptyTap { persistPost() }
+
+        // 1) タイトルにフォーカスしているなら、最初のブロックを作る or 末尾へフォーカス移動
+        if focusedBlockId == post.id {
+            if blocksForPost.isEmpty {
+                // 先頭へ 1 つ作成してそこへフォーカス
+                let newBlock = blockStore.createBlockAtStart(for: post.id, type: .text)
+                focusedBlockId = newBlock.id
+            } else {
+                // 既存がある場合は末尾へ移動
+                focusedBlockId = blocksForPost.last?.id
+            }
+            blockStore.saveBlocks()
+            return
+        }
+
+        // 2) いずれかのブロックにフォーカスしている場合は、その直下に挿入
+        if let focusedId = focusedBlockId, let idx = blockStore.blocks.firstIndex(where: { $0.id == focusedId && $0.postId == post.id }) {
+            let curr = blockStore.blocks[idx]
+            let newBlock = Block(
+                id: UUID(),
+                type: curr.type,
+                content: "",
+                parentId: curr.parentId,
+                postId: post.id,
+                boardId: curr.boardId,
+                order: curr.order + 1
+            )
+            blockStore.insert(newBlock, after: focusedId)
+            focusedBlockId = newBlock.id
+            blockStore.saveBlocks()
+            return
+        }
+
+        // 3) 何もフォーカスがないときは、末尾に 1 つ作る（なければ先頭を作る）
+        if let last = blocksForPost.last {
+            let newBlock = Block(
+                id: UUID(),
+                type: .text,
+                content: "",
+                parentId: last.parentId,
+                postId: post.id,
+                boardId: last.boardId,
+                order: last.order + 1
+            )
+            blockStore.insert(newBlock, after: last.id)
+            focusedBlockId = newBlock.id
+            blockStore.saveBlocks()
+        } else {
+            let newBlock = blockStore.createBlock(for: post.id, type: .text)
+            focusedBlockId = newBlock.id
+            blockStore.saveBlocks()
+        }
+    }
+
+    /// 現在のポスト内容を BlockStore に反映して保存
+    private func persistPost() {
+        // BlockStore に同一 ID のエントリがあれば置き換えて保存
+        blockStore.replace(post)
+        blockStore.saveBlocks()
+    }
+
+    private var blocksForPost: [Block] {
+        blockStore.blocks.filter { $0.postId == post.id }
+    }
 
     var body: some View {
         return NavigationView {
@@ -28,11 +114,19 @@ struct PostEditorView: View {
                         HStack(alignment: .center, spacing: 4) {
                             TextField("ポストの内容", text: $post.content, onEditingChanged: { editing in
                                 if editing {
-                                    focusedBlockId = nil
+                                    focusedBlockId = post.id
                                 }
                             })
+                                .simultaneousGesture(TapGesture().onEnded { focusedBlockId = post.id })
+                                .focused($titleFocusedInternal)
+                                .onSubmit {
+                                    addBlock(trigger: .titleEnter)
+                                }
                                 .font(.title2)
                                 .bold()
+                                .onChange(of: focusedBlockId) { _, newId in
+                                    titleFocusedInternal = (newId == post.id)
+                                }
 
                             Text((post.createdAt ?? Date()).formatted(.dateTime.year().month().day().hour().minute()))
                                 .font(.caption)
@@ -42,7 +136,7 @@ struct PostEditorView: View {
 
                             Menu {
                                 Button("編集", action: {
-                                    // ここに編集アクションを追加できます（今はPostEditorなので空でOK）
+                                    // 編集アクション（PostEditorなので空でOK）
                                 })
                                 Button("削除", role: .destructive, action: {
                                     // 削除アクション（必要であれば渡す）
@@ -55,32 +149,20 @@ struct PostEditorView: View {
                     }
 
                     BlockEditorView(
-                        blocks: $blocks,
+                        postId: post.id,
                         focusedBlockId: $focusedBlockId,
                         onDuplicate: { blk in
                             var duplicated = blk
                             duplicated.id = UUID()
-                            if let idx = blocks.firstIndex(where: { $0.id == blk.id }) {
-                                blocks.insert(duplicated, at: idx + 1)
-                            } else {
-                                blocks.append(duplicated)
-                            }
-                            saveBlocks()
+                            blockStore.insert(duplicated, after: blk.id)
+                            blockStore.saveBlocks()
                         },
                         onDelete: { id in
-                            if let idx = blocks.firstIndex(where: { $0.id == id }) {
-                                blocks.remove(at: idx)
-                                if idx > 0 {
-                                    focusedBlockId = blocks[idx - 1].id
-                                } else if !blocks.isEmpty {
-                                    focusedBlockId = blocks.first?.id
-                                } else {
-                                    focusedBlockId = nil
-                                }
-                                saveBlocks()
-                            }
-                        },
-                        saveBlocks: saveBlocks
+                            blockStore.deleteBlock(id: id)
+                            let siblings = blockStore.blocks.filter { $0.postId == post.id }
+                            focusedBlockId = siblings.dropLast().last?.id
+                            blockStore.saveBlocks()
+                        }
                     )
 
                     if !isHandwritingMode {
@@ -89,16 +171,7 @@ struct PostEditorView: View {
                             .background(Color.clear)
                             .contentShape(Rectangle())
                             .onTapGesture {
-                                if let lastBlock = blocks.last {
-                                    focusedBlockId = lastBlock.id
-                                    // Move cursor to the end of the last block's text
-                                    if let idx = blocks.firstIndex(where: { $0.id == lastBlock.id }) {
-                                        // Force SwiftUI to update binding so that cursor goes to end
-                                        var updated = blocks[idx]
-                                        updated.content = blocks[idx].content // no change, just trigger focus
-                                        blocks[idx] = updated
-                                    }
-                                }
+                                addBlock(trigger: .emptyTap)
                             }
                     }
 
@@ -121,11 +194,15 @@ struct PostEditorView: View {
                 }
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    if let lastBlock = blocks.last {
-                        focusedBlockId = lastBlock.id
-                    }
+                    addBlock(trigger: .emptyTap)
                 }
                 .padding(.horizontal)
+            }
+            .onAppear {
+                if isNew && blocksForPost.isEmpty {
+                    focusedBlockId = post.id
+                    titleFocusedInternal = true
+                }
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -141,7 +218,7 @@ struct PostEditorView: View {
                             let fullImage = canvasView.drawing.image(from: canvasView.bounds, scale: UIScreen.main.scale)
                             if let trimmed = trimBottomTransparent(from: fullImage) {
                                 let filename = saveImageToDocuments(trimmed)
-                                if let lastBlock = blocks.last {
+                                if let lastBlock = blocksForPost.last {
                                     let imageBlock = Block(
                                         id: UUID(),
                                         type: .image,
@@ -151,12 +228,14 @@ struct PostEditorView: View {
                                         boardId: lastBlock.boardId,
                                         order: lastBlock.order + 1
                                     )
-                                    blocks.append(imageBlock)
+                                    blockStore.insert(imageBlock, after: lastBlock.id)
+                                    blockStore.saveBlocks()
                                 }
                             }
                             canvasView.drawing = PKDrawing()
                         }
-                        onSave(post, blocks)
+                        persistPost()
+                        onSave(post, blocksForPost)
                         dismiss()
                     }
                 }
@@ -171,7 +250,7 @@ struct PostEditorView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
                         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                        addNewBlockAction()
+                        addBlock(trigger: .plusButton)
                     } label: {
                         Image(systemName: "plus")
                     }
@@ -181,21 +260,20 @@ struct PostEditorView: View {
     }
 
     func insertNewBlockBelow(_ id: UUID) -> UUID? {
-        guard let index = blocks.firstIndex(where: { $0.id == id }) else { return nil }
-        let current = blocks[index]
-        let newBlockId = UUID()
+        guard let index = blockStore.blocks.firstIndex(where: { $0.id == id && $0.postId == post.id }) else { return nil }
+        let current = blockStore.blocks[index]
         let newBlock = Block(
-            id: newBlockId,
+            id: UUID(),
             type: current.type,
             content: "",
             parentId: current.parentId,
-            postId: current.postId,
+            postId: post.id,
             boardId: current.boardId,
             order: current.order + 1
         )
-        blocks.insert(newBlock, at: index + 1)
-        saveBlocks()
-        return newBlockId
+        blockStore.insert(newBlock, after: id)
+        blockStore.saveBlocks()
+        return newBlock.id
     }
 
     func toggleHandwritingMode() {
@@ -204,7 +282,7 @@ struct PostEditorView: View {
             let fullImage = canvasView.drawing.image(from: canvasView.bounds, scale: UIScreen.main.scale)
             if let trimmed = trimBottomTransparent(from: fullImage) {
                 let filename = saveImageToDocuments(trimmed)
-                if let lastBlock = blocks.last {
+                if let lastBlock = blocksForPost.last {
                     let imageBlock = Block(
                         id: UUID(),
                         type: .image,
@@ -214,8 +292,8 @@ struct PostEditorView: View {
                         boardId: lastBlock.boardId,
                         order: lastBlock.order + 1
                     )
-                    blocks.append(imageBlock)
-                    saveBlocks()
+                    blockStore.insert(imageBlock, after: lastBlock.id)
+                    blockStore.saveBlocks()
                 }
             }
             canvasView.drawing = PKDrawing()
@@ -262,77 +340,6 @@ struct PostEditorView: View {
         return filename
     }
 
-    /// Adds a new block below the focused block or as appropriate for handwriting mode.
-    func addNewBlockAction() {
-        if !isHandwritingMode {
-            if let focusedId = focusedBlockId {
-                // Insert new block below focused block with placeholder text
-                guard let index = blocks.firstIndex(where: { $0.id == focusedId }) else { return }
-                let current = blocks[index]
-                let newBlock = Block(
-                    id: UUID(),
-                    type: current.type,
-                    content: "",
-                    parentId: current.parentId,
-                    postId: current.postId,
-                    boardId: current.boardId,
-                    order: current.order + 1
-                )
-                blocks.insert(newBlock, at: index + 1)
-                focusedBlockId = newBlock.id
-                saveBlocks()
-            } else {
-                // Append a new text block with placeholder text at the end and focus it
-                let lastBlock = blocks.last
-                let newBlock = Block(
-                    id: UUID(),
-                    type: .text,
-                    content: "新規ブロック",
-                    parentId: lastBlock?.parentId,
-                    postId: lastBlock?.postId,
-                    boardId: lastBlock?.boardId,
-                    order: (lastBlock?.order ?? 0) + 1
-                )
-                blocks.append(newBlock)
-                focusedBlockId = newBlock.id
-                saveBlocks()
-            }
-        } else if isHandwritingMode {
-            // Save current canvas as image block, clear canvas, then insert a new text block after the image block, and show fresh canvas
-            let fullImage = canvasView.drawing.image(from: canvasView.bounds, scale: UIScreen.main.scale)
-            if let trimmed = trimBottomTransparent(from: fullImage) {
-                let filename = saveImageToDocuments(trimmed)
-                // Add image block at the end
-                let lastBlock = blocks.last
-                let imageBlock = Block(
-                    id: UUID(),
-                    type: .image,
-                    content: filename,
-                    parentId: lastBlock?.parentId,
-                    postId: lastBlock?.postId,
-                    boardId: lastBlock?.boardId,
-                    order: (lastBlock?.order ?? 0) + 1
-                )
-                blocks.append(imageBlock)
-                // Clear canvas for next input
-                canvasView.drawing = PKDrawing()
-                // Insert a new text block after the image block
-                let textBlock = Block(
-                    id: UUID(),
-                    type: .text,
-                    content: "",
-                    parentId: imageBlock.parentId,
-                    postId: imageBlock.postId,
-                    boardId: imageBlock.boardId,
-                    order: imageBlock.order + 1
-                )
-                blocks.append(textBlock)
-                // Set focus to the new text block
-                focusedBlockId = textBlock.id
-                saveBlocks()
-            }
-        }
-    }
 
 }
 

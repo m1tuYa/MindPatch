@@ -8,8 +8,9 @@ struct ContentView: View {
         NavigationSplitView {
             SidebarView(selectedBoard: $selectedBoard)
         } detail: {
-            TimelineView(board: selectedBoard, blockStore: blockStore)
+            TimelineView(board: selectedBoard)
         }
+        .environmentObject(blockStore)
         .onAppear {
             // Removed debug print statement
         }

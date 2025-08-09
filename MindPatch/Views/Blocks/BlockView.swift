@@ -3,6 +3,9 @@ import SwiftUI
 struct CustomTextView: UIViewRepresentable {
     @Binding var text: String
     @Binding var isFocused: Bool
+    @Binding var moveCursorToPosition: Int?
+    @Binding var preferredXForFocus: CGFloat?
+    @Binding var focusEdgeIsBottom: Bool?
     let onEnter: () -> Void
     let onShiftEnter: () -> Void
     let onTab: () -> Void
@@ -11,34 +14,107 @@ struct CustomTextView: UIViewRepresentable {
     let onSplitBlock: (_ before: String, _ after: String) -> Void
     let onMergeOrDelete: (_ isEmpty: Bool) -> Void
     let onTextChange: ((String) -> Void)?
+    let onMoveToPrevBlock: ((_ preferredX: CGFloat?) -> Void)?
+    let onMoveToNextBlock: ((_ preferredX: CGFloat?) -> Void)?
+
+    final class ArrowAwareTextView: UITextView {
+        var onMoveToPrevBlock: ((_ preferredX: CGFloat?) -> Void)?
+        var onMoveToNextBlock: ((_ preferredX: CGFloat?) -> Void)?
+        var preferredX: CGFloat?
+
+        override var keyCommands: [UIKeyCommand]? {
+            return [
+                UIKeyCommand(input: UIKeyCommand.inputUpArrow, modifierFlags: [], action: #selector(moveUp)),
+                UIKeyCommand(input: UIKeyCommand.inputDownArrow, modifierFlags: [], action: #selector(moveDown))
+            ]
+        }
+
+        @objc private func moveUp() { move(vertical: -1) }
+        @objc private func moveDown() { move(vertical: +1) }
+
+        private func move(vertical dir: Int) {
+            guard let range = selectedTextRange else { return }
+            let rect = caretRect(for: range.start)
+            if preferredX == nil { preferredX = rect.midX }
+
+            let lineH = font?.lineHeight ?? 18
+            let target = CGPoint(x: preferredX ?? rect.midX, y: rect.midY + CGFloat(dir) * lineH)
+
+            if let pos = closestPosition(to: target), let r = textRange(from: pos, to: pos) {
+                selectedTextRange = r
+            } else {
+                if dir < 0 {
+                    onMoveToPrevBlock?(preferredX)
+                } else {
+                    onMoveToNextBlock?(preferredX)
+                }
+            }
+        }
+
+    }
 
     func makeUIView(context: Context) -> UITextView {
-        let textView = UITextView()
+        let textView = ArrowAwareTextView()
         textView.delegate = context.coordinator
         textView.font = UIFont.systemFont(ofSize: 16)
         textView.isScrollEnabled = false
         textView.backgroundColor = .clear
         textView.textContainerInset = .zero
+        textView.onMoveToPrevBlock = { x in
+            context.coordinator.parent.onMoveToPrevBlock?(x)
+        }
+        textView.onMoveToNextBlock = { x in
+            context.coordinator.parent.onMoveToNextBlock?(x)
+        }
+        context.coordinator.lastAssignedText = text
+        textView.text = text
         return textView
     }
 
     func updateUIView(_ uiView: UITextView, context: Context) {
-        if uiView.text != text {
-            uiView.text = text
+        // 1) Apply external text only when it truly changed from the last delegate callback.
+        //    Avoid fighting UIKit while user is typing / composing (IME) or holding first responder.
+        if context.coordinator.lastAssignedText != text {
+            if !(uiView.isFirstResponder && uiView.markedTextRange != nil) && !context.coordinator.isApplyingProgrammaticUpdate {
+                context.coordinator.isApplyingProgrammaticUpdate = true
+                uiView.text = text
+                context.coordinator.lastAssignedText = text
+                context.coordinator.isApplyingProgrammaticUpdate = false
+            }
         }
+
+        // 2) Focus handling: only act when explicitly told (caret move).
         if isFocused {
-            if !uiView.isFirstResponder {
+            if let pos = moveCursorToPosition {
                 DispatchQueue.main.async {
-                    uiView.becomeFirstResponder()
+                    let safe = max(0, min(pos, uiView.text.count))
+                    uiView.selectedRange = NSRange(location: safe, length: 0)
+                    context.coordinator.lastAssignedText = uiView.text
+                    context.coordinator.lastProgrammaticCursorPosition = safe
+                    context.coordinator.lastProgrammaticCursorAt = Date()
+                    if !uiView.isFirstResponder { uiView.becomeFirstResponder() }
                 }
-            }
-        } else {
-            if uiView.isFirstResponder {
-                DispatchQueue.main.async {
-                    uiView.resignFirstResponder()
-                }
+                moveCursorToPosition = nil
             }
         }
+        // Handle preferredXForFocus and focusEdgeIsBottom when becoming focused
+        if isFocused, (preferredXForFocus != nil || focusEdgeIsBottom != nil) {
+            DispatchQueue.main.async {
+                guard let tv = uiView as? ArrowAwareTextView else { return }
+                let x = preferredXForFocus
+                let useBottom = (focusEdgeIsBottom ?? false)
+                let refPos = useBottom ? tv.endOfDocument : tv.beginningOfDocument
+                let refRect = tv.caretRect(for: refPos)
+                let target = CGPoint(x: x ?? refRect.midX, y: refRect.midY)
+                if let pos = tv.closestPosition(to: target), let r = tv.textRange(from: pos, to: pos) {
+                    tv.selectedTextRange = r
+                }
+                tv.preferredX = x
+                preferredXForFocus = nil
+                focusEdgeIsBottom = nil
+            }
+        }
+        // NOTE: Do not force resign on !isFocused to prevent focus tug-of-war.
     }
 
     func makeCoordinator() -> Coordinator {
@@ -47,6 +123,11 @@ struct CustomTextView: UIViewRepresentable {
 
     class Coordinator: NSObject, UITextViewDelegate {
         var parent: CustomTextView
+        var justBeganEditing: Bool = false
+        var isApplyingProgrammaticUpdate: Bool = false
+        var lastAssignedText: String = ""
+        var lastProgrammaticCursorPosition: Int? = nil
+        var lastProgrammaticCursorAt: Date? = nil
 
         init(_ parent: CustomTextView) {
             self.parent = parent
@@ -55,6 +136,21 @@ struct CustomTextView: UIViewRepresentable {
         func textViewDidChange(_ textView: UITextView) {
             parent.text = textView.text
             parent.onTextChange?(textView.text)
+            lastAssignedText = textView.text
+        }
+
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            parent.isFocused = true
+            justBeganEditing = true
+            DispatchQueue.main.async { [weak self] in
+                self?.justBeganEditing = false
+            }
+        }
+
+        func textViewDidChangeSelection(_ textView: UITextView) {
+            if let tv = textView as? ArrowAwareTextView, let r = textView.selectedTextRange {
+                tv.preferredX = textView.caretRect(for: r.start).midX
+            }
         }
 
         func textViewDidEndEditing(_ textView: UITextView) {
@@ -63,25 +159,30 @@ struct CustomTextView: UIViewRepresentable {
         }
 
         func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
-            if text.isEmpty && range.location == 0 {
-                let isEmptyBlock = textView.text.isEmpty
-                // 空ブロック → 削除
-                if isEmptyBlock {
-                    parent.onMergeOrDelete(true)
-                    return false
+            // Intercept Backspace only when the caret is at the very start and there's no selection.
+            if text.isEmpty {
+                // If user selected some range, allow normal deletion.
+                if range.length > 0 { return true }
+                // If the caret was just programmatically moved, allow the system to handle one normal backspace.
+                if let pos = lastProgrammaticCursorPosition, let t = lastProgrammaticCursorAt, Date().timeIntervalSince(t) < 0.25, range.location == pos {
+                    // clear the marker so only the next backspace is allowed through
+                    lastProgrammaticCursorPosition = nil
+                    lastProgrammaticCursorAt = nil
+                    return true
                 }
-                // 非空ブロック → 文字数が2文字以上のときだけマージ
-                if range.length > 0 && textView.text.count > 1 {
-                    parent.onMergeOrDelete(false)
+                // Only when caret is exactly at start -> custom merge/delete.
+                if range.location == 0 {
+                    let isEmptyBlock = (textView.text ?? "").isEmpty
+                    parent.onMergeOrDelete(isEmptyBlock)
                     return false
                 }
             }
-            // Enter handling
+            // Handle Enter: split the block at the caret.
             if text == "\n" {
                 let cursorPosition = range.location
                 let currentText = textView.text ?? ""
                 if cursorPosition == currentText.count {
-                    // Cursor at end -> split with empty after
+                    // Caret at end -> after part is empty
                     parent.onSplitBlock(currentText, "")
                 } else {
                     let beforeIndex = currentText.index(currentText.startIndex, offsetBy: cursorPosition)
@@ -91,15 +192,18 @@ struct CustomTextView: UIViewRepresentable {
                 }
                 return false
             }
+            // Allow system to perform the change (normal typing/deleting/middle-of-text backspace, etc.)
             return true
         }
     }
 }
 
 struct BlockView: View {
+    @EnvironmentObject var blockStore: BlockStore
     @Binding var block: Block
     var index: Int? = nil
     var indentLevel: Int = 0
+    @Binding var moveCursorToPosition: Int?
     @Binding var focusedBlockId: UUID?
     var onDelete: ((UUID) -> Void)? = nil
     var onDuplicate: ((Block) -> Void)? = nil
@@ -113,10 +217,26 @@ struct BlockView: View {
     var onSplitBlock: ((_ before: String, _ after: String) -> Void)? = nil
     var onMergeOrDelete: ((_ isEmpty: Bool) -> Void)? = nil
 
-    init(block: Binding<Block>, index: Int? = nil, indentLevel: Int = 0, focusedBlockId: Binding<UUID?>, onDelete: ((UUID) -> Void)? = nil, onDuplicate: ((Block) -> Void)? = nil, onEnter: ((UUID) -> Void)? = nil, onShiftEnter: ((UUID) -> Void)? = nil, onTab: ((UUID) -> Void)? = nil, onShiftTab: ((UUID) -> Void)? = nil, onDeleteEmpty: (() -> Void)? = nil, onSplitBlock: ((_ before: String, _ after: String) -> Void)? = nil, onMergeOrDelete: ((_ isEmpty: Bool) -> Void)? = nil) {
+    init(
+        block: Binding<Block>,
+        index: Int? = nil,
+        indentLevel: Int = 0,
+        moveCursorToPosition: Binding<Int?>,
+        focusedBlockId: Binding<UUID?>,
+        onDelete: ((UUID) -> Void)? = nil,
+        onDuplicate: ((Block) -> Void)? = nil,
+        onEnter: ((UUID) -> Void)? = nil,
+        onShiftEnter: ((UUID) -> Void)? = nil,
+        onTab: ((UUID) -> Void)? = nil,
+        onShiftTab: ((UUID) -> Void)? = nil,
+        onDeleteEmpty: (() -> Void)? = nil,
+        onSplitBlock: ((_ before: String, _ after: String) -> Void)? = nil,
+        onMergeOrDelete: ((_ isEmpty: Bool) -> Void)? = nil
+    ) {
         self._block = block
         self.index = index
         self.indentLevel = indentLevel
+        self._moveCursorToPosition = moveCursorToPosition
         self._focusedBlockId = focusedBlockId
         self.onDelete = onDelete
         self.onDuplicate = onDuplicate
@@ -128,6 +248,11 @@ struct BlockView: View {
         self.onSplitBlock = onSplitBlock
         self.onMergeOrDelete = onMergeOrDelete
     }
+
+    @State private var preferredXForFocus: CGFloat? = nil
+    @State private var focusEdgeIsBottom: Bool? = nil
+    var onMoveToPrevBlock: ((_ preferredX: CGFloat?) -> Void)? = nil
+    var onMoveToNextBlock: ((_ preferredX: CGFloat?) -> Void)? = nil
 
     var body: some View {
         HStack(alignment: .center) {
@@ -143,27 +268,45 @@ struct BlockView: View {
                         Menu("タイプを変更") {
                             Button("テキスト") {
                                 print("✏️ Change type to text")
-                                block.type = .text
+                                var updated = block
+                                updated.type = .text
+                                blockStore.replace(updated)
+                                blockStore.saveBlocks()
                             }
                             Button("見出し1") {
                                 print("🔠 Change type to heading1")
-                                block.type = .heading1
+                                var updated = block
+                                updated.type = .heading1
+                                blockStore.replace(updated)
+                                blockStore.saveBlocks()
                             }
                             Button("見出し2") {
                                 print("🔡 Change type to heading2")
-                                block.type = .heading2
+                                var updated = block
+                                updated.type = .heading2
+                                blockStore.replace(updated)
+                                blockStore.saveBlocks()
                             }
                             Button("リスト") {
                                 print("🔘 Change type to list")
-                                block.type = .list
+                                var updated = block
+                                updated.type = .list
+                                blockStore.replace(updated)
+                                blockStore.saveBlocks()
                             }
                             Button("番号付きリスト") {
                                 print("🔢 Change type to numberedList")
-                                block.type = .numberedList
+                                var updated = block
+                                updated.type = .numberedList
+                                blockStore.replace(updated)
+                                blockStore.saveBlocks()
                             }
                             Button("チェックボックス") {
                                 print("☑️ Change type to checkbox")
-                                block.type = .checkbox
+                                var updated = block
+                                updated.type = .checkbox
+                                blockStore.replace(updated)
+                                blockStore.saveBlocks()
                             }
                         }
                     } label: {
@@ -191,6 +334,9 @@ struct BlockView: View {
                                 }
                             }
                         ),
+                        moveCursorToPosition: $moveCursorToPosition,
+                        preferredXForFocus: $preferredXForFocus,
+                        focusEdgeIsBottom: $focusEdgeIsBottom,
                         onEnter: { onEnter?(block.id) ?? () },
                         onShiftEnter: { onShiftEnter?(block.id) ?? block.content.append("\n") },
                         onTab: { onTab?(block.id) },
@@ -205,8 +351,12 @@ struct BlockView: View {
                             onMergeOrDelete?(isEmpty)
                         },
                         onTextChange: { newText in
-                            block.content = newText
-                        }
+                            var updated = block
+                            updated.content = newText
+                            blockStore.replace(updated)
+                        },
+                        onMoveToPrevBlock: { x in onMoveToPrevBlock?(x) },
+                        onMoveToNextBlock: { x in onMoveToNextBlock?(x) }
                     )
                 case .heading1:
                     CustomTextView(
@@ -219,6 +369,9 @@ struct BlockView: View {
                                 }
                             }
                         ),
+                        moveCursorToPosition: $moveCursorToPosition,
+                        preferredXForFocus: $preferredXForFocus,
+                        focusEdgeIsBottom: $focusEdgeIsBottom,
                         onEnter: { onEnter?(block.id) ?? () },
                         onShiftEnter: { onShiftEnter?(block.id) ?? block.content.append("\n") },
                         onTab: { onTab?(block.id) },
@@ -233,8 +386,12 @@ struct BlockView: View {
                             onMergeOrDelete?(isEmpty)
                         },
                         onTextChange: { newText in
-                            block.content = newText
-                        }
+                            var updated = block
+                            updated.content = newText
+                            blockStore.replace(updated)
+                        },
+                        onMoveToPrevBlock: { x in onMoveToPrevBlock?(x) },
+                        onMoveToNextBlock: { x in onMoveToNextBlock?(x) }
                     )
                     .font(.title2)
                     .bold()
@@ -249,6 +406,9 @@ struct BlockView: View {
                                 }
                             }
                         ),
+                        moveCursorToPosition: $moveCursorToPosition,
+                        preferredXForFocus: $preferredXForFocus,
+                        focusEdgeIsBottom: $focusEdgeIsBottom,
                         onEnter: { onEnter?(block.id) ?? () },
                         onShiftEnter: { onShiftEnter?(block.id) ?? block.content.append("\n") },
                         onTab: { onTab?(block.id) },
@@ -263,8 +423,12 @@ struct BlockView: View {
                             onMergeOrDelete?(isEmpty)
                         },
                         onTextChange: { newText in
-                            block.content = newText
-                        }
+                            var updated = block
+                            updated.content = newText
+                            blockStore.replace(updated)
+                        },
+                        onMoveToPrevBlock: { x in onMoveToPrevBlock?(x) },
+                        onMoveToNextBlock: { x in onMoveToNextBlock?(x) }
                     )
                     .font(.title3)
                     .bold()
@@ -281,6 +445,9 @@ struct BlockView: View {
                                     }
                                 }
                             ),
+                            moveCursorToPosition: $moveCursorToPosition,
+                            preferredXForFocus: $preferredXForFocus,
+                            focusEdgeIsBottom: $focusEdgeIsBottom,
                             onEnter: { onEnter?(block.id) ?? () },
                             onShiftEnter: { onShiftEnter?(block.id) ?? block.content.append("\n") },
                             onTab: { onTab?(block.id) },
@@ -295,8 +462,12 @@ struct BlockView: View {
                                 onMergeOrDelete?(isEmpty)
                             },
                             onTextChange: { newText in
-                                block.content = newText
-                            }
+                                var updated = block
+                                updated.content = newText
+                                blockStore.replace(updated)
+                            },
+                            onMoveToPrevBlock: { x in onMoveToPrevBlock?(x) },
+                            onMoveToNextBlock: { x in onMoveToNextBlock?(x) }
                         )
                     }
                 case .numberedList:
@@ -316,6 +487,9 @@ struct BlockView: View {
                                     }
                                 }
                             ),
+                            moveCursorToPosition: $moveCursorToPosition,
+                            preferredXForFocus: $preferredXForFocus,
+                            focusEdgeIsBottom: $focusEdgeIsBottom,
                             onEnter: { onEnter?(block.id) ?? () },
                             onShiftEnter: { onShiftEnter?(block.id) ?? block.content.append("\n") },
                             onTab: { onTab?(block.id) },
@@ -330,8 +504,12 @@ struct BlockView: View {
                                 onMergeOrDelete?(isEmpty)
                             },
                             onTextChange: { newText in
-                                block.content = newText
-                            }
+                                var updated = block
+                                updated.content = newText
+                                blockStore.replace(updated)
+                            },
+                            onMoveToPrevBlock: { x in onMoveToPrevBlock?(x) },
+                            onMoveToNextBlock: { x in onMoveToNextBlock?(x) }
                         )
                     }
                 case .checkbox:
@@ -347,6 +525,9 @@ struct BlockView: View {
                                     }
                                 }
                             ),
+                            moveCursorToPosition: $moveCursorToPosition,
+                            preferredXForFocus: $preferredXForFocus,
+                            focusEdgeIsBottom: $focusEdgeIsBottom,
                             onEnter: { onEnter?(block.id) ?? () },
                             onShiftEnter: { onShiftEnter?(block.id) ?? block.content.append("\n") },
                             onTab: { onTab?(block.id) },
@@ -361,8 +542,12 @@ struct BlockView: View {
                                 onMergeOrDelete?(isEmpty)
                             },
                             onTextChange: { newText in
-                                block.content = newText
-                            }
+                                var updated = block
+                                updated.content = newText
+                                blockStore.replace(updated)
+                            },
+                            onMoveToPrevBlock: { x in onMoveToPrevBlock?(x) },
+                            onMoveToNextBlock: { x in onMoveToNextBlock?(x) }
                         )
                     }
                 case .image:
@@ -381,11 +566,8 @@ struct BlockView: View {
             }
         }
         .padding(.leading, CGFloat(indentLevel) * 20)
-        .onChange(of: focusedBlockId) { oldValue, newValue in
-            if oldValue == block.id && newValue != block.id {
-                // Focus lost -> persist changes (trigger state update)
-                block.content = block.content
-            }
+        .onChange(of: focusedBlockId) { _, _ in
+            // No-op: focus is reflected by UIKit callbacks; avoid mutating during updates
         }
     }
 }
